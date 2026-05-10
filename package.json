@@ -14,8 +14,8 @@
   },
   "files": [
     ".opencode/dist",
-    ".opencode/commands",
     ".opencode/opencode.json",
+    "commands",
     "skills"
   ],
   "keywords": [
