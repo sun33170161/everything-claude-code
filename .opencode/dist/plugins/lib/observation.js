@@ -80,12 +80,12 @@ function scrubArgs(args) {
         return JSON.stringify(args);
     }
 }
-export function recordObservation(worktree, toolName, args) {
+export function recordObservation(worktree, toolName, args, event = "tool_complete") {
     const project = detectProject(worktree);
     fs.mkdirSync(project.projectDir, { recursive: true });
     const observation = {
         timestamp: new Date().toISOString(),
-        event: "tool_complete",
+        event,
         tool: toolName,
         args: scrubArgs(args),
         project_id: project.id,

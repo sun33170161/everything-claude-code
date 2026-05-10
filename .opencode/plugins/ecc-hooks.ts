@@ -194,6 +194,24 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
       output: { messages: Array<{ info: { role: string }; parts: Array<{ type: string; text: string }> }> }
     ) => {
       if (!output.messages?.length) return
+
+      // Record prompt events for each user message (before injection marker check)
+      if (hookEnabled("obs:prompt", ["standard", "strict"])) {
+        for (const msg of output.messages) {
+          if (msg.info?.role === "user" && msg.parts?.length) {
+            const textPart = msg.parts.find((p) => p.type === "text")
+            if (textPart?.text) {
+              try {
+                recordObservation(worktreePath, "prompt", { text: textPart.text.slice(0, 500) }, "prompt")
+              } catch {
+                // Observation failed silently
+              }
+            }
+            break // Only first user message per transform
+          }
+        }
+      }
+
       const firstUser = output.messages.find((m) => m.info?.role === "user")
       if (!firstUser || !firstUser.parts?.length) return
       // Only inject once per session (use ECC-specific marker to avoid collision with superpowers plugin)
@@ -351,6 +369,15 @@ ${content}
     "tool.execute.before": async (
       input: { tool: string; callID?: string; args?: Record<string, unknown> }
     ) => {
+      // Record tool_start observation
+      if (hookEnabled("pre:observe", ["standard", "strict"])) {
+        try {
+          recordObservation(worktreePath, input.tool, input.args, "tool_start")
+        } catch {
+          // Observation failed silently
+        }
+      }
+
       if (input.tool === "write") {
         const filePath = getFilePath(input.args)
         if (filePath) {

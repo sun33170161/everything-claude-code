@@ -104,13 +104,14 @@ export function recordObservation(
   worktree: string,
   toolName: string,
   args: Record<string, unknown> | undefined,
+  event: string = "tool_complete",
 ): void {
   const project = detectProject(worktree)
   fs.mkdirSync(project.projectDir, { recursive: true })
 
   const observation = {
     timestamp: new Date().toISOString(),
-    event: "tool_complete",
+    event,
     tool: toolName,
     args: scrubArgs(args),
     project_id: project.id,
