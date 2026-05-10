@@ -3,6 +3,9 @@
   "plugin": [
     "./plugins"
   ],
+  "skills": {
+    "paths": ["../skills"]
+  },
   "command": {
     "learn": {
       "description": "Extract patterns and learnings from session",

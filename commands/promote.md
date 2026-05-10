@@ -4,7 +4,7 @@ description: Promote project instincts to global scope
 
 # Promote Command
 
-Promote instincts from project scope to global scope in continuous-learning-v2.
+Promote instincts from project scope to global scope (CLv2 instinct system).
 
 ## Your Task
 

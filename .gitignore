@@ -69,9 +69,8 @@ temp/
 *.bak
 *.backup
 
+# OpenCode skill discovery dir (auto-generated symlinks)
+.agents/
+
 # Observer temp files (continuous-learning-v2)
 .observer-tmp/
-
-# OpenCode
-.opencode/package-lock.json
-.opencode/node_modules/

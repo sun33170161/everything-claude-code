@@ -4,7 +4,7 @@ description: Show learned instincts (project + global) with confidence
 
 # Instinct Status Command
 
-Show instinct status from continuous-learning-v2: $ARGUMENTS
+Show instinct status (CLv2 instinct system): $ARGUMENTS
 
 ## Your Task
 
