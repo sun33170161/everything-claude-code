@@ -445,11 +445,13 @@ ${content}
          * Action: Sets PROJECT_ROOT, PACKAGE_MANAGER, DETECTED_LANGUAGES, ECC_VERSION
          */
         "shell.env": async () => {
+            const instinctCliPath = path.join(projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py");
             const env = {
                 ECC_VERSION: "1.8.0",
                 ECC_PLUGIN: "true",
                 ECC_HOOK_PROFILE: currentProfile,
                 ECC_DISABLED_HOOKS: process.env.ECC_DISABLED_HOOKS || "",
+                ECC_INSTINCT_CLI: instinctCliPath,
                 PROJECT_ROOT: worktreePath,
             };
             // Detect package manager

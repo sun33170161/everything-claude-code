@@ -8,9 +8,7 @@ Exports instincts to a shareable format.
 
 ## Your Task
 
-1. Locate `instinct-cli.py` (part of ecc plugin, in its skills directory):
-   - Use `glob(**/instinct-cli.py)` or `find ~/.cache/opencode -name "instinct-cli.py" 2>/dev/null`
-2. Run the located script with the `export` subcommand and passed flags
+Run `python3 "$ECC_INSTINCT_CLI" export $ARGUMENTS`
 
 ## Usage
 
