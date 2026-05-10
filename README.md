@@ -7,7 +7,7 @@ Instinct-based learning system for OpenCode. Observes tool use, extracts pattern
 Run directly from the project root:
 
 ```bash
-cd .opencode && npm install && npm run build && cd ..
+npm install && npm run build
 opencode .
 ```
 
@@ -80,7 +80,7 @@ OpenCode auto-downloads and loads the plugin on next launch.
 ### Option 2: Run in-place (development)
 
 ```bash
-cd .opencode && npm install && npm run build && cd ..
+npm install && npm run build
 opencode .
 ```
 

@@ -18,6 +18,10 @@
     ".opencode/opencode.json",
     "skills"
   ],
+  "scripts": {
+    "build": "tsc -p .opencode/tsconfig.json",
+    "clean": "rm -rf .opencode/dist"
+  },
   "keywords": [
     "opencode",
     "plugin",
@@ -27,5 +31,12 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.14.30"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
   }
 }
