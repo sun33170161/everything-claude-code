@@ -159,12 +159,9 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
       // OpenCode does NOT read "command" from plugin-level opencode.json,
       // so we must register them via the config hook by mutating config.command.
       // See https://github.com/anomalyco/opencode/issues/24065
-      // Note: OpenCode does NOT support the "shell.env" hook, so we cannot
-      // use env vars. Instead, resolve absolute paths here at config time.
+      // Templates use $ECC_INSTINCT_CLI which is resolved at shell execution
+      // time via the shell.env hook below.
       const commandsDir = path.join(projectRoot, "commands")
-      const instinctCliPath = path.join(
-        projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py"
-      )
       if (fs.existsSync(commandsDir)) {
         const commandConfig = ((config.command as Record<string, unknown>) || {})
         const files = fs.readdirSync(commandsDir)
@@ -176,10 +173,8 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
           const fullPath = path.join(commandsDir, file)
           const content = fs.readFileSync(fullPath, "utf8")
           const { frontmatter, content: body } = extractAndStripFrontmatter(content)
-          // Replace $ECC_INSTINCT_CLI with the absolute path to instinct-cli.py
-          const template = body.replace(/\$ECC_INSTINCT_CLI/g, instinctCliPath)
           commandConfig[name] = {
-            template: template + "\n\n$ARGUMENTS",
+            template: body + "\n\n$ARGUMENTS",
             description: frontmatter.description || `ECC command: ${name}`,
           }
         }
@@ -188,36 +183,60 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
     },
 
     /**
-     * CLv2 Bootstrap Injection (Superpowers-style)
+     * CLv2 Bootstrap + ECC Commands Injection (Superpowers-style)
      *
-     * Reads skills/continuous-learning-v2/SKILL.md and injects it into the
-     * first user message so the AI is always aware of CLv2 capabilities.
-     * Replaces the instructions field in opencode.json.
+     * Injects CLv2 skill content AND ECC command definitions into the
+     * first user message so the AI is aware of both capabilities and
+     * available slash commands.
      */
     "experimental.chat.messages.transform": async (
       _input: unknown,
       output: { messages: Array<{ info: { role: string }; parts: Array<{ type: string; text: string }> }> }
     ) => {
-      const skillPath = path.join(projectSkillsDir, "continuous-learning-v2", "SKILL.md")
-      if (!fs.existsSync(skillPath)) return
-
-      const fullContent = fs.readFileSync(skillPath, "utf8")
-      const { content } = extractAndStripFrontmatter(fullContent)
-      if (!content.trim()) return
-
-      const bootstrap = `<EXTREMELY_IMPORTANT>
-The CLv2 (Continuous Learning v2) skill content is included below. It is already loaded — you are following it. Do NOT use the skill tool to load it again — that would be redundant.
-
-${content}
-</EXTREMELY_IMPORTANT>`
-
       if (!output.messages?.length) return
       const firstUser = output.messages.find((m) => m.info?.role === "user")
       if (!firstUser || !firstUser.parts?.length) return
-      // Only inject once per session
-      if (firstUser.parts.some((p) => p.type === "text" && p.text.includes("EXTREMELY_IMPORTANT"))) return
+      // Only inject once per session (use ECC-specific marker to avoid collision with superpowers plugin)
+      if (firstUser.parts.some((p) => p.type === "text" && p.text.includes("ECC_EXTREMELY_IMPORTANT"))) return
       const ref = firstUser.parts[0]
-      firstUser.parts.unshift({ ...ref, type: "text" as const, text: bootstrap })
+
+      // Build CLv2 bootstrap
+      const skillPath = path.join(projectSkillsDir, "continuous-learning-v2", "SKILL.md")
+      let bootstrap = ""
+      if (fs.existsSync(skillPath)) {
+        const fullContent = fs.readFileSync(skillPath, "utf8")
+        const { content } = extractAndStripFrontmatter(fullContent)
+        if (content.trim()) {
+          bootstrap += `<ECC_EXTREMELY_IMPORTANT>
+The CLv2 (Continuous Learning v2) skill content is included below. It is already loaded — you are following it. Do NOT use the skill tool to load it again — that would be redundant.
+
+${content}
+</ECC_EXTREMELY_IMPORTANT>\n\n`
+        }
+      }
+
+      // Build ECC commands reference from commands/ directory
+      const commandsDir = path.join(projectRoot, "commands")
+      let cmdHelp = ""
+      if (fs.existsSync(commandsDir)) {
+        const files = fs.readdirSync(commandsDir).filter((f) => f.endsWith(".md"))
+        if (files.length > 0) {
+          cmdHelp = "## Available ECC Commands\n\nType these in the TUI:\n\n"
+          for (const file of files) {
+            const name = file.replace(/\.md$/, "")
+            const fullPath = path.join(commandsDir, file)
+            const content = fs.readFileSync(fullPath, "utf8")
+            const { frontmatter } = extractAndStripFrontmatter(content)
+            const desc = frontmatter.description || `ECC command: ${name}`
+            cmdHelp += `- **/${name}**: ${desc}\n`
+          }
+        }
+      }
+
+      const injection = bootstrap + cmdHelp
+      if (!injection.trim()) return
+
+      firstUser.parts.unshift({ ...ref, type: "text" as const, text: injection })
     },
 
     /**
@@ -524,10 +543,13 @@ ${content}
      * Shell Environment Hook
      * OpenCode-specific: Inject environment variables into shell commands
      *
-     * Triggers: Before shell command execution
-     * Action: Sets PROJECT_ROOT, PACKAGE_MANAGER, DETECTED_LANGUAGES, ECC_VERSION
+     * Triggers: Before shell command execution (both AI tools and user terminal)
+     * Action: Sets env vars on output.env as documented at https://opencode.ai/docs/plugins#inject-environment-variables
      */
-    "shell.env": async () => {
+    "shell.env": async (
+      _input: { cwd: string },
+      output: { env: Record<string, string> }
+    ) => {
       const instinctCliPath = path.join(
         projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py"
       )
@@ -573,7 +595,8 @@ ${content}
         env.PRIMARY_LANGUAGE = detected[0]
       }
 
-      return env
+      // Set env vars on output so OpenCode injects them into shell execution
+      output.env = env
     },
 
     /**
