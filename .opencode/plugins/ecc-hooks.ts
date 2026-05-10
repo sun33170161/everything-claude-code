@@ -146,6 +146,7 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
      * - skills/continuous-learning-v2/ (CLv2)
      */
     config: async (config: Record<string, unknown>) => {
+      // Register skills path (existing)
       const skillsConfig = (config.skills as Record<string, unknown>) || {}
       const paths = (skillsConfig.paths as string[]) || []
       if (!paths.includes(projectSkillsDir)) {
@@ -153,6 +154,30 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
       }
       skillsConfig.paths = paths
       config.skills = skillsConfig
+
+      // Register commands from commands/ directory
+      // OpenCode does NOT read "command" from plugin-level opencode.json,
+      // so we must register them via the config hook by mutating config.command.
+      // See https://github.com/anomalyco/opencode/issues/24065
+      const commandsDir = path.join(projectRoot, "commands")
+      if (fs.existsSync(commandsDir)) {
+        const commandConfig = ((config.command as Record<string, unknown>) || {})
+        const files = fs.readdirSync(commandsDir)
+        for (const file of files) {
+          if (!file.endsWith(".md")) continue
+          const name = file.replace(/\.md$/, "")
+          // Don't override user-defined commands
+          if (commandConfig[name]) continue
+          const fullPath = path.join(commandsDir, file)
+          const content = fs.readFileSync(fullPath, "utf8")
+          const { frontmatter, content: body } = extractAndStripFrontmatter(content)
+          commandConfig[name] = {
+            template: body + "\n\n$ARGUMENTS",
+            description: frontmatter.description || `ECC command: ${name}`,
+          }
+        }
+        config.command = commandConfig
+      }
     },
 
     /**
