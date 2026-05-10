@@ -4,20 +4,24 @@ Instinct-based learning system for OpenCode. Observes tool use, extracts pattern
 
 ## Quick Start
 
-```bash
-# Install to ~/.opencode/ (recommended)
-./install.sh
-
-# Start opencode with the project
-opencode ~/.opencode
-```
-
-Or run directly from the project root:
+Run directly from the project root:
 
 ```bash
 cd .opencode && npm install && npm run build && cd ..
 opencode .
 ```
+
+Or install as a plugin (superpowers-style):
+
+Add to your global `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": ["ecc@git+https://github.com/zwsun/everything-claude-code.git"]
+}
+```
+
+Restart OpenCode. All CLv2 skills and commands auto-discover.
 
 ## Commands
 
@@ -61,21 +65,19 @@ The plugin at `.opencode/plugins/ecc-hooks.ts` provides lifecycle hooks via Open
 
 ## Installation
 
-### Option 1: Install to ~/.opencode/
+### Option 1: Plugin reference (superpowers-style)
 
-```bash
-./install.sh
-opencode ~/.opencode
+Add to your global `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": ["ecc@git+https://github.com/zwsun/everything-claude-code.git"]
+}
 ```
 
-Copies the entire project (minus `.git`, `node_modules/`) to `~/.opencode/` and builds the OpenCode plugin. Custom destination:
+OpenCode auto-downloads and loads the plugin on next launch.
 
-```bash
-./install.sh /custom/path
-opencode /custom/path
-```
-
-### Option 2: Run in-place
+### Option 2: Run in-place (development)
 
 ```bash
 cd .opencode && npm install && npm run build && cd ..
@@ -89,18 +91,25 @@ everything-claude-code/
 ├── package.json                     # npm package (main → plugin entry)
 ├── CLAUDE.md                        # AI agent configuration
 ├── README.md
-├── install.sh                       # Install to ~/.opencode/
-├── commands/                        # 9 CLv2 command templates (root level, like superpowers)
+├── commands/                        # 9 CLv2 command templates (root level)
 ├── skills/                          # Auto-discovered via skill tool
 │   └── continuous-learning-v2/
 │       ├── SKILL.md                 # Full CLv2 documentation
 │       └── scripts/
 │           └── instinct-cli.py      # Core instinct CLI
 └── .opencode/                       # Minimal (superpowers-style)
-    ├── opencode.json                # Config only (no commands, no instructions)
-    ├── plugins/ecc-hooks.ts         # Plugin: config.skills.paths + bootstrap injection
-    ├── tools/                       # Custom tools (tied to plugin)
-    └── dist/                        # Compiled plugin output
+    ├── opencode.json                # Config (plugin path, commands)
+    ├── package.json                 # npm deps + build scripts
+    ├── tsconfig.json                # TypeScript config
+    ├── plugins/                     # Plugin source + compiled output
+    │   ├── ecc-hooks.ts             # Main hook logic
+    │   ├── index.ts
+    │   ├── lib/
+    │   │   ├── observation.ts       # Direct JSONL observation writer
+    │   │   └── changed-files-store.ts
+    │   └── tools/
+    │       └── changed-files.ts     # Changed-files tool
+    └── dist/                        # Compiled plugin output (committed)
 ```
 
 ## Architecture (Superpowers-style)
@@ -110,7 +119,7 @@ This project follows the same plugin architecture as [superpowers](https://githu
 | Feature | Approach |
 |---------|----------|
 | **Skills discovery** | Plugin registers `skills/` path via `config.skills.paths` — all SKILL.md files auto-discovered by `skill` tool |
-| **Bootstrap** | Plugin injects CLv2 context into first user message via `experimental.chat.messages.transform` — replaces `instructions` field |
-| **Commands** | OpenCode command templates at `.opencode/commands/` |
-| **Installation** | `install.sh` copies to target directory; or use `opencode <path>` |
+| **Bootstrap** | Plugin injects CLv2 context into first user message via `experimental.chat.messages.transform` |
+| **Commands** | OpenCode command templates at `commands/` (root level) |
+| **Installation** | Plugin reference via `opencode.json` `plugin` array |
 | **npm package** | Root `package.json` with `main` pointing to compiled plugin |

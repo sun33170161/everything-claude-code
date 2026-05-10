@@ -5,7 +5,7 @@ import {
   hasChanges,
   type ChangeType,
   type TreeNode,
-} from "../plugins/lib/changed-files-store.js"
+} from "../lib/changed-files-store.js"
 
 const INDICATORS: Record<ChangeType, string> = {
   added: "+",

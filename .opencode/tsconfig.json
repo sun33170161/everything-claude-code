@@ -16,9 +16,7 @@
     "isolatedModules": true
   },
   "include": [
-    "index.ts",
-    "plugins/**/*.ts",
-    "tools/**/*.ts"
+    "plugins/**/*.ts"
   ],
   "exclude": [
     "node_modules",

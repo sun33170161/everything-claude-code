@@ -26,7 +26,7 @@ import {
   recordChange,
   clearChanges,
 } from "./lib/changed-files-store.js"
-import changedFilesTool from "../tools/changed-files.js"
+import changedFilesTool from "./tools/changed-files.js"
 import { recordObservation } from "./lib/observation.js"
 
 // Resolve project root by walking up from plugin dir until we find skills/

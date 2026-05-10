@@ -39,6 +39,7 @@ lerna-debug.log*
 
 # Build outputs
 dist/
+!.opencode/dist/
 build/
 *.tsbuildinfo
 .cache/

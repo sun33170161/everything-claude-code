@@ -16,16 +16,13 @@
     ".opencode/dist",
     ".opencode/commands",
     ".opencode/opencode.json",
-    "skills",
-    "scripts",
-    "hooks"
+    "skills"
   ],
   "keywords": [
     "opencode",
     "plugin",
     "continuous-learning",
-    "instinct",
-    "claude-code"
+    "instinct"
   ],
   "license": "MIT",
   "engines": {
