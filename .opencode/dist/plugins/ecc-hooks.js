@@ -128,7 +128,10 @@ export const ECCHooksPlugin = async ({ client, $, directory, worktree, }) => {
             // OpenCode does NOT read "command" from plugin-level opencode.json,
             // so we must register them via the config hook by mutating config.command.
             // See https://github.com/anomalyco/opencode/issues/24065
+            // Note: OpenCode does NOT support the "shell.env" hook, so we cannot
+            // use env vars. Instead, resolve absolute paths here at config time.
             const commandsDir = path.join(projectRoot, "commands");
+            const instinctCliPath = path.join(projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py");
             if (fs.existsSync(commandsDir)) {
                 const commandConfig = (config.command || {});
                 const files = fs.readdirSync(commandsDir);
@@ -142,8 +145,10 @@ export const ECCHooksPlugin = async ({ client, $, directory, worktree, }) => {
                     const fullPath = path.join(commandsDir, file);
                     const content = fs.readFileSync(fullPath, "utf8");
                     const { frontmatter, content: body } = extractAndStripFrontmatter(content);
+                    // Replace $ECC_INSTINCT_CLI with the absolute path to instinct-cli.py
+                    const template = body.replace(/\$ECC_INSTINCT_CLI/g, instinctCliPath);
                     commandConfig[name] = {
-                        template: body + "\n\n$ARGUMENTS",
+                        template: template + "\n\n$ARGUMENTS",
                         description: frontmatter.description || `ECC command: ${name}`,
                     };
                 }
