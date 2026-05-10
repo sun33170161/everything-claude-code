@@ -8,11 +8,9 @@ Import instincts from local file paths or HTTP(S) URLs.
 
 ## Your Task
 
-Run:
-
-```bash
-python3 skills/continuous-learning-v2/scripts/instinct-cli.py import <file-or-url> [--dry-run] [--force] [--min-confidence 0.7] [--scope project|global]
-```
+1. Locate `instinct-cli.py` (part of ecc plugin, in its skills directory):
+   - Use `glob(**/instinct-cli.py)` or `find ~/.cache/opencode -name "instinct-cli.py" 2>/dev/null`
+2. Run the located script with the `import` subcommand and passed flags
 
 ## Usage
 

@@ -8,11 +8,9 @@ Analyzes instincts and clusters related ones into higher-level structures.
 
 ## Your Task
 
-Run:
-
-```bash
-python3 skills/continuous-learning-v2/scripts/instinct-cli.py evolve [--generate]
-```
+1. Locate `instinct-cli.py` (part of ecc plugin, in its skills directory):
+   - Use `glob(**/instinct-cli.py)` or `find ~/.cache/opencode -name "instinct-cli.py" 2>/dev/null`
+2. Run the located script with the `evolve` subcommand and passed flags
 
 ## Usage
 
