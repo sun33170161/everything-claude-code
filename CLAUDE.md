@@ -37,7 +37,7 @@ All commands are registered in `.opencode/commands/`:
 ## Development
 
 ```bash
-npm install && npm run build   # Build OpenCode plugin
+cd .opencode && npm install && npm run build   # Build OpenCode plugin
 python3 skills/continuous-learning-v2/scripts/instinct-cli.py status  # Quick test
 ```
 
