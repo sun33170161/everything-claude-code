@@ -1,15 +1,18 @@
 ---
-name: instinct-export
-description: Export instincts from project/global scope to a file
-command: /instinct-export
+description: Export instincts for sharing
 ---
 
 # Instinct Export Command
 
-Exports instincts to a shareable format. Perfect for:
-- Sharing with teammates
-- Transferring to a new machine
-- Contributing to project conventions
+Exports instincts to a shareable format.
+
+## Your Task
+
+Run:
+
+```bash
+python3 skills/continuous-learning-v2/scripts/instinct-cli.py export [--domain <name>] [--min-confidence <n>] [--output <file>] [--scope <scope>]
+```
 
 ## Usage
 
@@ -23,40 +26,9 @@ Exports instincts to a shareable format. Perfect for:
 
 ## What to Do
 
-1. Detect current project context
-2. Load instincts by selected scope:
-   - `project`: current project only
-   - `global`: global only
-   - `all`: project + global merged (default)
-3. Apply filters (`--domain`, `--min-confidence`)
-4. Write YAML-style export to file (or stdout if no output path provided)
-
-## Output Format
-
-Creates a YAML file:
-
-```yaml
-# Instincts Export
-# Generated: 2025-01-22
-# Source: personal
-# Count: 12 instincts
-
----
-id: prefer-functional-style
-trigger: "when writing new functions"
-confidence: 0.8
-domain: code-style
-source: session-observation
-scope: project
-project_id: a1b2c3d4e5f6
-project_name: my-app
----
-
-# Prefer Functional Style
-
-## Action
-Use functional patterns over classes.
-```
+1. Load instincts by scope: `project` / `global` / `all` (default)
+2. Apply filters (`--domain`, `--min-confidence`)
+3. Write YAML-style export to file (or stdout if no output path)
 
 ## Flags
 

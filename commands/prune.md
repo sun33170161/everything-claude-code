@@ -1,25 +1,17 @@
 ---
-name: prune
 description: Delete pending instincts older than 30 days that were never promoted
-command: true
 ---
 
 # Prune Pending Instincts
 
 Remove expired pending instincts that were auto-generated but never reviewed or promoted.
 
-## Implementation
+## Your Task
 
-Run the instinct CLI using the plugin root path:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/continuous-learning-v2/scripts/instinct-cli.py" prune
-```
-
-Or if `CLAUDE_PLUGIN_ROOT` is not set (manual installation):
+Run:
 
 ```bash
-python3 ~/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py prune
+python3 skills/continuous-learning-v2/scripts/instinct-cli.py prune [--max-age <days>] [--dry-run]
 ```
 
 ## Usage
@@ -29,3 +21,9 @@ python3 ~/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py prune
 /prune --max-age 60      # Custom age threshold (days)
 /prune --dry-run         # Preview without deleting
 ```
+
+## What to Do
+
+1. Scan pending instincts in `$ECC_DATA_DIR/homunculus/`
+2. Delete instincts whose creation date exceeds the max age threshold (default: 30 days)
+3. Report: how many deleted, how much space freed

@@ -38,7 +38,8 @@ except ImportError:
 # Configuration
 # ─────────────────────────────────────────────
 
-HOMUNCULUS_DIR = Path.home() / ".claude" / "homunculus"
+_ECC_DATA_DIR = os.environ.get("ECC_DATA_DIR", "")
+HOMUNCULUS_DIR = Path(_ECC_DATA_DIR).resolve() / "homunculus" if _ECC_DATA_DIR else Path.home() / ".opencode" / "homunculus"
 PROJECTS_DIR = HOMUNCULUS_DIR / "projects"
 REGISTRY_FILE = HOMUNCULUS_DIR / "projects.json"
 

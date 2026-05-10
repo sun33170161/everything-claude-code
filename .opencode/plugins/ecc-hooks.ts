@@ -11,17 +11,56 @@
  * - Stop → session.idle / session.status
  * - SessionStart → session.created
  * - SessionEnd → session.deleted
+ *
+ * Superpowers-style features:
+ * - config hook: registers skills/ path for skill tool auto-discovery
+ * - experimental.chat.messages.transform: injects CLv2 bootstrap into first user message
  */
 
 import type { PluginInput } from "@opencode-ai/plugin"
 import * as fs from "fs"
 import * as path from "path"
+import { fileURLToPath } from "url"
 import {
   initStore,
   recordChange,
   clearChanges,
 } from "./lib/changed-files-store.js"
 import changedFilesTool from "../tools/changed-files.js"
+import { recordObservation } from "./lib/observation.js"
+
+// Resolve project root by walking up from plugin dir until we find skills/
+// This works regardless of runtime mode (TS source, compiled ESM) or install depth
+const pluginDir = path.dirname(fileURLToPath(import.meta.url))
+const projectRoot = (() => {
+  let dir = pluginDir
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, "skills"))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return pluginDir
+})()
+const projectSkillsDir = path.join(projectRoot, "skills")
+
+// Simple frontmatter extraction (no dependencies needed at bootstrap time)
+const extractAndStripFrontmatter = (content: string): { frontmatter: Record<string, string>; content: string } => {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+  if (!match) return { frontmatter: {}, content }
+
+  const frontmatter: Record<string, string> = {}
+  for (const line of match[1].split("\n")) {
+    const colonIdx = line.indexOf(":")
+    if (colonIdx > 0) {
+      const key = line.slice(0, colonIdx).trim()
+      const value = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, "")
+      frontmatter[key] = value
+    }
+  }
+
+  return { frontmatter, content: match[2].trimStart() }
+}
 
 type ECCHooksPluginFn = (input: PluginInput) => Promise<Record<string, unknown>>
 
@@ -100,6 +139,56 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
 
   return {
     /**
+     * Skills Path Registration (Superpowers-style)
+     *
+     * Registers the project skills/ directory so OpenCode's skill tool
+     * auto-discovers all SKILL.md files. Currently registers:
+     * - skills/continuous-learning-v2/ (CLv2)
+     */
+    config: async (config: Record<string, unknown>) => {
+      const skillsConfig = (config.skills as Record<string, unknown>) || {}
+      const paths = (skillsConfig.paths as string[]) || []
+      if (!paths.includes(projectSkillsDir)) {
+        paths.push(projectSkillsDir)
+      }
+      skillsConfig.paths = paths
+      config.skills = skillsConfig
+    },
+
+    /**
+     * CLv2 Bootstrap Injection (Superpowers-style)
+     *
+     * Reads skills/continuous-learning-v2/SKILL.md and injects it into the
+     * first user message so the AI is always aware of CLv2 capabilities.
+     * Replaces the instructions field in opencode.json.
+     */
+    "experimental.chat.messages.transform": async (
+      _input: unknown,
+      output: { messages: Array<{ info: { role: string }; parts: Array<{ type: string; text: string }> }> }
+    ) => {
+      const skillPath = path.join(projectSkillsDir, "continuous-learning-v2", "SKILL.md")
+      if (!fs.existsSync(skillPath)) return
+
+      const fullContent = fs.readFileSync(skillPath, "utf8")
+      const { content } = extractAndStripFrontmatter(fullContent)
+      if (!content.trim()) return
+
+      const bootstrap = `<EXTREMELY_IMPORTANT>
+The CLv2 (Continuous Learning v2) skill content is included below. It is already loaded — you are following it. Do NOT use the skill tool to load it again — that would be redundant.
+
+${content}
+</EXTREMELY_IMPORTANT>`
+
+      if (!output.messages?.length) return
+      const firstUser = output.messages.find((m) => m.info?.role === "user")
+      if (!firstUser || !firstUser.parts?.length) return
+      // Only inject once per session
+      if (firstUser.parts.some((p) => p.type === "text" && p.text.includes("EXTREMELY_IMPORTANT"))) return
+      const ref = firstUser.parts[0]
+      firstUser.parts.unshift({ ...ref, type: "text" as const, text: bootstrap })
+    },
+
+    /**
      * Prettier Auto-Format Hook
      * Equivalent to Claude Code PostToolUse hook for prettier
      *
@@ -160,6 +249,14 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
           pendingToolChanges.delete(key)
         } else {
           recordChange(filePath, "modified")
+        }
+      }
+
+      if (hookEnabled("post:observe", ["standard", "strict"]) && input.tool !== "bash") {
+        try {
+          recordObservation(worktreePath, input.tool, input.args as Record<string, unknown> | undefined)
+        } catch {
+          // Observation failed silently
         }
       }
 
@@ -352,6 +449,7 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
      */
     "session.deleted": async () => {
       if (!hookEnabled("session:end-marker", ["minimal", "standard", "strict"])) return
+
       log("info", "[ECC] Session ended - cleaning up")
       editedFiles.clear()
       clearChanges()

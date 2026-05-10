@@ -1,10 +1,10 @@
 ---
-description: Extract reusable patterns from the current session and save them as candidate skills or guidance.
+description: Extract patterns and learnings from current session
 ---
 
-# /learn - Extract Reusable Patterns
+# Learn Command
 
-Analyze the current session and extract any patterns worth saving as skills.
+Extract patterns, learnings, and reusable insights from the current session.
 
 ## Trigger
 
@@ -12,41 +12,23 @@ Run `/learn` at any point during a session when you've solved a non-trivial prob
 
 ## What to Extract
 
-Look for:
-
-1. **Error Resolution Patterns**
-   - What error occurred?
-   - What was the root cause?
-   - What fixed it?
-   - Is this reusable for similar errors?
-
-2. **Debugging Techniques**
-   - Non-obvious debugging steps
-   - Tool combinations that worked
-   - Diagnostic patterns
-
-3. **Workarounds**
-   - Library quirks
-   - API limitations
-   - Version-specific fixes
-
-4. **Project-Specific Patterns**
-   - Codebase conventions discovered
-   - Architecture decisions made
-   - Integration patterns
+1. **Error Resolution Patterns** — root cause + fix + reusability
+2. **Debugging Techniques** — non-obvious steps, tool combinations
+3. **Workarounds** — library quirks, API limitations, version-specific fixes
+4. **Project-Specific Patterns** — conventions, architecture decisions
 
 ## Output Format
 
-Create a skill file at `~/.claude/skills/learned/[pattern-name].md`:
+Save to `$ECC_DATA_DIR/skills/learned/[pattern-name].md` (default: `~/.opencode/skills/learned/`):
 
 ```markdown
 # [Descriptive Pattern Name]
 
 **Extracted:** [Date]
-**Context:** [Brief description of when this applies]
+**Context:** [When this applies]
 
 ## Problem
-[What problem this solves - be specific]
+[What this solves]
 
 ## Solution
 [The pattern/technique/workaround]
@@ -55,7 +37,7 @@ Create a skill file at `~/.claude/skills/learned/[pattern-name].md`:
 [Code example if applicable]
 
 ## When to Use
-[Trigger conditions - what should activate this skill]
+[Trigger conditions]
 ```
 
 ## Process
@@ -64,11 +46,11 @@ Create a skill file at `~/.claude/skills/learned/[pattern-name].md`:
 2. Identify the most valuable/reusable insight
 3. Draft the skill file
 4. Ask user to confirm before saving
-5. Save to `~/.claude/skills/learned/`
+5. Save to `$ECC_DATA_DIR/skills/learned/`
 
 ## Notes
 
 - Don't extract trivial fixes (typos, simple syntax errors)
-- Don't extract one-time issues (specific API outages, etc.)
+- Don't extract one-time issues (specific API outages)
 - Focus on patterns that will save time in future sessions
-- Keep skills focused - one pattern per skill
+- Keep skills focused — one pattern per skill

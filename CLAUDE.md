@@ -1,72 +1,49 @@
-# CLAUDE.md
+# CLv2 — Continuous Learning v2
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-This is a **Claude Code plugin** - a collection of production-ready agents, skills, hooks, commands, rules, and MCP configurations. The project provides battle-tested workflows for software development using Claude Code.
-
-## Running Tests
-
-```bash
-# Run all tests
-node tests/run-all.js
-
-# Run individual test files
-node tests/lib/utils.test.js
-node tests/lib/package-manager.test.js
-node tests/hooks/hooks.test.js
-```
+This is the **everything-claude-code** project — stripped to CLv2 only. CLv2 is a continuous learning system for AI coding agents (OpenCode). It observes tool usage, extracts behavioral patterns as atomic "instincts", clusters them into skills/commands, and persists them across sessions.
 
 ## Architecture
 
-The project is organized into several core components:
-
-- **agents/** - Specialized subagents for delegation (planner, code-reviewer, tdd-guide, etc.)
-- **skills/** - Workflow definitions and domain knowledge (coding standards, patterns, testing)
-- **commands/** - Slash commands invoked by users (/tdd, /plan, /e2e, etc.)
-- **hooks/** - Trigger-based automations (session persistence, pre/post-tool hooks)
-- **rules/** - Always-follow guidelines (security, coding style, testing requirements)
-- **mcp-configs/** - MCP server configurations for external integrations
-- **scripts/** - Cross-platform Node.js utilities for hooks and setup
-- **tests/** - Test suite for scripts and utilities
+```
+.opencode/opencode.json          # OpenCode configuration (plugin, commands, tools)
+skills/continuous-learning-v2/   # Core CLv2: SKILL.md + instinct-cli.py
+```
 
 ## Key Commands
 
-- `/tdd` - Test-driven development workflow
-- `/plan` - Implementation planning
-- `/e2e` - Generate and run E2E tests
-- `/code-review` - Quality review
-- `/build-fix` - Fix build errors
-- `/learn` - Extract patterns from sessions
-- `/skill-create` - Generate skills from git history
+All commands are registered in `.opencode/commands/`:
 
-## Development Notes
+| Command | Action |
+|---------|--------|
+| `/instinct-status` | Show learned instincts (project + global) |
+| `/learn` | Extract patterns from current session |
+| `/learn-eval` | Extract + quality gate + save |
+| `/evolve` | Cluster instincts into skills/commands/agents |
+| `/instinct-export` | Export instincts to file |
+| `/instinct-import` | Import instincts from file/URL |
+| `/promote` | Promote project instinct to global scope |
+| `/projects` | List known projects |
+| `/prune` | Delete expired pending instincts |
 
-- Package manager detection: npm, pnpm, yarn, bun (configurable via `CLAUDE_PACKAGE_MANAGER` env var or project config)
-- Cross-platform: Windows, macOS, Linux support via Node.js scripts
-- Agent format: Markdown with YAML frontmatter (name, description, tools, model)
-- Skill format: Markdown with clear sections for when to use, how it works, examples
-- Skill placement: Curated in skills/; generated/imported under ~/.claude/skills/. See docs/SKILL-PLACEMENT-POLICY.md
-- Hook format: JSON with matcher conditions and command/notification hooks
+## Data Storage
 
-## Contributing
+- **Default**: `~/.opencode/homunculus/`
+- **Override**: `ECC_DATA_DIR` env var
+- **Structure**:
+  - `homunculus/projects/<project-id>/instincts/` — project-scoped
+  - `homunculus/instincts/personal/` — global personal instincts
+  - `homunculus/instincts/inherited/` — imported from others
 
-Follow the formats in CONTRIBUTING.md:
-- Agents: Markdown with frontmatter (name, description, tools, model)
-- Skills: Clear sections (When to Use, How It Works, Examples)
-- Commands: Markdown with description frontmatter
-- Hooks: JSON with matcher and hooks array
+## Development
 
-File naming: lowercase with hyphens (e.g., `python-reviewer.md`, `tdd-workflow.md`)
+```bash
+cd .opencode && npm install && npm run build   # Build OpenCode plugin
+./install.sh                                    # Install to ~/.opencode/clv2/
+python3 skills/continuous-learning-v2/scripts/instinct-cli.py status  # Quick test
+```
 
-## Skills
+## Rules
 
-Use the following skills when working on related files:
-
-| File(s) | Skill |
-|---------|-------|
-| `README.md` | `/readme` |
-| `.github/workflows/*.yml` | `/ci-workflow` |
-
-When spawning subagents, always pass conventions from the respective skill into the agent's prompt.
+- Don't modify `skills/continuous-learning-v2/` unless fixing a bug in CLv2 itself
+- All paths respect `ECC_DATA_DIR` env var (fallback `~/.opencode`)
+- `commands/` are OpenCode command templates — keep detailed enough for agent execution

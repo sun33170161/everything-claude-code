@@ -1,32 +1,48 @@
-#!/usr/bin/env bash
-# install.sh — Legacy shell entrypoint for the ECC installer.
-#
-# This wrapper resolves the real repo/package root when invoked through a
-# symlinked npm bin, then delegates to the Node-based installer runtime.
-
+#!/bin/bash
+# CLv2 Installer — install everything-claude-code to ~/.opencode/
 set -euo pipefail
 
-SCRIPT_PATH="$0"
-while [ -L "$SCRIPT_PATH" ]; do
-    link_dir="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
-    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$link_dir/$SCRIPT_PATH"
-done
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+ECC_SRC="$(cd "$(dirname "$0")" && pwd)"
+ECC_DEST="${1:-$HOME/.opencode}"
 
-# Auto-install Node dependencies when running from a git clone
-if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
-    echo "[ECC] Installing dependencies..."
-    (cd "$SCRIPT_DIR" && npm install --no-audit --no-fund --loglevel=error)
-fi
+echo "Installing CLv2 to $ECC_DEST ..."
 
-# On MSYS2/Git Bash, convert the POSIX path to a Windows path so Node.js
-# (a native Windows binary) receives a valid path instead of a doubled one
-# like G:\g\projects\... that results from Git Bash's auto path conversion.
-if command -v cygpath &>/dev/null; then
-    NODE_SCRIPT="$(cygpath -w "$SCRIPT_DIR/scripts/install-apply.js")"
-else
-    NODE_SCRIPT="$SCRIPT_DIR/scripts/install-apply.js"
-fi
+mkdir -p "$ECC_DEST"
 
-exec node "$NODE_SCRIPT" "$@"
+# Copy all project files (exclude git, build artifacts)
+rsync -a --delete \
+  --exclude='.git/' \
+  --exclude='node_modules/' \
+  --exclude='.opencode/node_modules/' \
+  --exclude='.opencode/dist/' \
+  "$ECC_SRC/" "$ECC_DEST/"
+
+# Build OpenCode plugin
+echo "Building OpenCode plugin ..."
+cd "$ECC_DEST/.opencode"
+npm install --silent 2>/dev/null
+npm run build
+
+echo ""
+echo "✓ Installed to $ECC_DEST"
+echo ""
+echo "Project structure (superpowers-style):"
+echo "  package.json             ← npm package (main → plugin)"
+echo "  .opencode/opencode.json  ← OpenCode config"
+echo "  .opencode/plugins/       ← Plugin with config + bootstrap hooks"
+echo "  skills/                  ← Auto-discovered via skill tool"
+echo "  commands/                ← 9 CLv2 command templates (root level)"
+echo ""
+echo "Usage:"
+echo "  opencode $ECC_DEST"
+echo ""
+echo "CLv2 commands:"
+echo "  /instinct-status    — Show learned instincts"
+echo "  /learn              — Extract patterns from session"
+echo "  /learn-eval         — Extract + evaluate + save"
+echo "  /evolve             — Cluster instincts into skills"
+echo "  /instinct-export    — Export instincts to file"
+echo "  /instinct-import    — Import instincts from file/URL"
+echo "  /promote            — Promote instincts to global scope"
+echo "  /projects           — List known projects"
+echo "  /prune              — Delete expired pending instincts"
