@@ -2,8 +2,7 @@
 """
 Instinct CLI - Manage instincts for Continuous Learning v2
 
-v2.1: Project-scoped instincts — different projects get different instincts,
-      with global instincts applied universally.
+v2.2: Added evolve config, unified config loader with auto-creation.
 
 Commands:
   status   - Show all instincts (project + global) and their status
@@ -87,6 +86,35 @@ VALID_COMMUNICATION_STYLES = ["concise", "detailed", "mixed"]
 VALID_RESPONSE_LANGUAGES = ["en", "zh", "auto"]
 VALID_LIKES_COMMENTS = ["minimal", "moderate", "thorough"]
 
+CONFIG_DEFAULTS = {
+    "version": "2.2",
+    "evolve": {
+        "llm_enabled": True,
+        "llm_timeout_seconds": 60,
+    },
+    "injection": {
+        "max_chars": 2000,
+        "min_confidence": 0.7,
+        "enabled": True,
+    },
+    "decay": {
+        "rate_per_30days": 0.8,
+        "high_confidence_rate": 0.9,
+        "deprecation_threshold": 0.3,
+    },
+    "analysis": {
+        "enabled": True,
+        "timeout_ms": 10000,
+        "min_observations": 20,
+    },
+    "observer": {
+        "enabled": False,
+        "run_interval_minutes": 5,
+        "min_observations_to_analyze": 20,
+    },
+}
+CONFIG_FILE = HOMUNCULUS_DIR / "config.json"
+
 # Ensure global directories exist (deferred to avoid side effects at import time)
 def _ensure_global_dirs():
     for d in [GLOBAL_PERSONAL_DIR, GLOBAL_INHERITED_DIR, GLOBAL_DEPRECATED_DIR,
@@ -133,6 +161,31 @@ def _create_default_identity() -> dict:
         with open(IDENTITY_FILE, "w", encoding="utf-8") as f:
             json.dump(defaults, f, indent=2)
     return defaults
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _load_config() -> dict:
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_FILE.exists():
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(CONFIG_DEFAULTS, f, indent=2)
+        return dict(CONFIG_DEFAULTS)
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            file_config = json.load(f)
+        return _deep_merge(CONFIG_DEFAULTS, file_config)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: config.json read error ({e}), using defaults", file=sys.stderr)
+        return dict(CONFIG_DEFAULTS)
 
 
 def _inject_identity_prompt(identity: dict = None) -> str:
@@ -673,6 +726,15 @@ def _load_user_profile_instincts(project: dict) -> list[dict]:
 def cmd_status(args) -> int:
     """Show status of all instincts (project + global)."""
     project = detect_project()
+
+    if getattr(args, 'show_config', False):
+        config = _load_config()
+        print(f"\n{'='*60}")
+        print(f"  CONFIGURATION")
+        print(f"{'='*60}\n")
+        print(json.dumps(config, indent=2))
+        print()
+        return 0
 
     # JSON format: output clean JSON for programmatic consumption
     if getattr(args, 'format', 'text') == 'json':
@@ -1944,7 +2006,8 @@ def cmd_identity(args) -> int:
 def main() -> int:
     _ensure_global_dirs()
     _create_default_identity()
-    parser = argparse.ArgumentParser(description='Instinct CLI for Continuous Learning v2.1 (Project-Scoped)')
+    _load_config()
+    parser = argparse.ArgumentParser(description='Instinct CLI for Continuous Learning v2.2')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
     # Status
@@ -1961,6 +2024,8 @@ def main() -> int:
                                help='Show user identity profile')
     status_parser.add_argument('--format', choices=['text', 'json'], default='text',
                                help='Output format (text for human, json for programmatic)')
+    status_parser.add_argument('--show-config', action='store_true',
+                               help='Show current configuration')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')
