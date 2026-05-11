@@ -122,6 +122,40 @@ def _yaml_quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _update_last_observed(file_path: Path) -> None:
+    """Update the last_observed field in an instinct file to current time.
+
+    Does nothing if file doesn't have a last_observed field (backward compat).
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = content.split('\n')
+    in_frontmatter = False
+    has_last_observed = False
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == '---':
+            if in_frontmatter:
+                in_frontmatter = False
+            else:
+                in_frontmatter = True
+            new_lines.append(line)
+        elif in_frontmatter and stripped.startswith('last_observed:'):
+            new_lines.append(f'last_observed: {now_str}')
+            has_last_observed = True
+        else:
+            new_lines.append(line)
+
+    if has_last_observed:
+        file_path.write_text('\n'.join(new_lines), encoding="utf-8")
+
+
 # ─────────────────────────────────────────────
 # Project Detection (Python equivalent of detect-project.sh)
 # ─────────────────────────────────────────────
@@ -338,6 +372,10 @@ def _load_instincts_from_dir(directory: Path, source_type: str, scope_label: str
                 # Default scope if not set in frontmatter
                 if 'scope' not in inst:
                     inst['scope'] = scope_label
+                # Backward compatibility: default last_observed to file mtime if not set
+                if 'last_observed' not in inst:
+                    mtime = datetime.fromtimestamp(os.path.getmtime(file), tz=timezone.utc)
+                    inst['last_observed'] = mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
             instincts.extend(parsed)
         except Exception as e:
             print(f"Warning: Failed to parse {file}: {e}", file=sys.stderr)
@@ -665,6 +703,8 @@ def cmd_import(args) -> int:
             output_content += f"project_name: {project['name']}\n"
         if inst.get('source_repo'):
             output_content += f"source_repo: {inst.get('source_repo')}\n"
+        if inst.get('last_observed'):
+            output_content += f"last_observed: {inst.get('last_observed')}\n"
         output_content += "---\n\n"
         output_content += inst.get('content', '') + "\n\n"
 
@@ -730,7 +770,7 @@ def cmd_export(args) -> int:
     for inst in instincts:
         output += "---\n"
         for key in ['id', 'trigger', 'confidence', 'domain', 'source', 'scope',
-                     'project_id', 'project_name', 'source_repo']:
+                     'project_id', 'project_name', 'source_repo', 'last_observed']:
             if inst.get(key):
                 value = inst[key]
                 if key == 'trigger':
@@ -1000,6 +1040,8 @@ def _promote_specific(project: dict, instinct_id: str, force: bool, dry_run: boo
     output_content += f"scope: global\n"
     output_content += f"promoted_from: {project['id']}\n"
     output_content += f"promoted_date: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}\n"
+    if target.get('last_observed'):
+        output_content += f"last_observed: {target.get('last_observed')}\n"
     output_content += "---\n\n"
     output_content += target.get('content', '') + "\n"
 

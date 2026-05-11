@@ -274,6 +274,71 @@ def test_parse_garbage_input():
     assert result == []
 
 
+def test_parse_last_observed():
+    """Instinct with last_observed should parse the field as a string."""
+    content = """\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+last_observed: 2025-06-01T00:00:00Z
+---
+
+## Action
+Test.
+"""
+    result = parse_instinct_file(content)
+    assert len(result) == 1
+    assert result[0].get('last_observed') == "2025-06-01T00:00:00Z"
+
+
+def test_parse_no_last_observed():
+    """Instinct without last_observed should not have the key."""
+    content = """\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+---
+
+## Action
+Test.
+"""
+    result = parse_instinct_file(content)
+    assert len(result) == 1
+    assert 'last_observed' not in result[0]
+
+
+def test_update_last_observed(tmp_path):
+    """_update_last_observed should write current timestamp back to file."""
+    instinct_file = tmp_path / "test.yaml"
+    content = """\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+last_observed: 2025-01-01T00:00:00Z
+---
+
+## Action
+Test.
+"""
+    instinct_file.write_text(content)
+
+    _mod._update_last_observed(instinct_file)
+
+    result = parse_instinct_file(instinct_file.read_text())
+    observed = result[0].get('last_observed', '')
+    assert observed != "2025-01-01T00:00:00Z"
+    assert observed.endswith("Z")
+    from datetime import datetime, timezone
+    dt = datetime.fromisoformat(observed.replace('Z', '+00:00'))
+    assert (datetime.now(timezone.utc) - dt).total_seconds() < 10
+
+
 # ─────────────────────────────────────────────
 # _validate_file_path tests
 # ─────────────────────────────────────────────
