@@ -47,6 +47,7 @@ REGISTRY_FILE = HOMUNCULUS_DIR / "projects.json"
 GLOBAL_INSTINCTS_DIR = HOMUNCULUS_DIR / "instincts"
 GLOBAL_PERSONAL_DIR = GLOBAL_INSTINCTS_DIR / "personal"
 GLOBAL_INHERITED_DIR = GLOBAL_INSTINCTS_DIR / "inherited"
+GLOBAL_DEPRECATED_DIR = GLOBAL_INSTINCTS_DIR / "deprecated"
 GLOBAL_EVOLVED_DIR = HOMUNCULUS_DIR / "evolved"
 GLOBAL_OBSERVATIONS_FILE = HOMUNCULUS_DIR / "observations.jsonl"
 
@@ -66,7 +67,7 @@ CONFIDENCE_DECAY_HIGH_RATE = 0.9  # For instincts with confidence >= 0.9 (decay 
 
 # Ensure global directories exist (deferred to avoid side effects at import time)
 def _ensure_global_dirs():
-    for d in [GLOBAL_PERSONAL_DIR, GLOBAL_INHERITED_DIR,
+    for d in [GLOBAL_PERSONAL_DIR, GLOBAL_INHERITED_DIR, GLOBAL_DEPRECATED_DIR,
               GLOBAL_EVOLVED_DIR / "skills", GLOBAL_EVOLVED_DIR / "commands", GLOBAL_EVOLVED_DIR / "agents",
               PROJECTS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
@@ -212,6 +213,87 @@ def _get_instincts_eligible_for_deprecation(instincts: list[dict]) -> list[dict]
     return [i for i in instincts if i.get('confidence', 0.5) < 0.3]
 
 
+def _move_to_deprecated(instinct_file: Path, project: dict) -> bool:
+    """Move an instinct file from personal/ to deprecated/ directory.
+
+    Returns True if move succeeded, False otherwise.
+    Only moves files from personal/ directories (not inherited/).
+    Creates deprecated/ dir if it doesn't exist.
+    """
+    file_path = Path(instinct_file).resolve()
+
+    # Determine target deprecated directory
+    file_str = str(file_path)
+    project_personal = str(project.get('instincts_personal', ''))
+    global_personal = str(GLOBAL_PERSONAL_DIR)
+
+    if project_personal and file_str.startswith(project_personal):
+        deprecated_dir = Path(project_personal).parent / "deprecated"
+    elif file_str.startswith(global_personal):
+        deprecated_dir = Path(GLOBAL_DEPRECATED_DIR)
+    else:
+        return False  # Only move from personal/ directories
+
+    deprecated_dir.mkdir(parents=True, exist_ok=True)
+    target = deprecated_dir / file_path.name
+
+    # Handle name collisions with timestamp suffix
+    if target.exists():
+        stem = file_path.stem
+        suffix = file_path.suffix
+        target = deprecated_dir / f"{stem}-{datetime.now().strftime('%Y%m%d%H%M%S')}{suffix}"
+
+    try:
+        file_path.rename(target)
+        return True
+    except OSError:
+        return False
+
+
+def _auto_deprecate(project: dict) -> list[str]:
+    """Auto-deprecate instincts with decayed confidence < 0.3.
+
+    Loads all instincts, applies decay, identifies eligible, moves files.
+    Returns list of deprecated instinct IDs.
+    Returns empty list if no instincts are eligible.
+    Skips user-profile domain instincts.
+    """
+    instincts = load_all_instincts(project)
+    _apply_confidence_decay(instincts)
+    eligible = _get_instincts_eligible_for_deprecation(instincts)
+
+    # Filter out user-profile domain (user preferences should not be auto-deprecated)
+    eligible = [i for i in eligible if i.get('domain') != 'user-profile']
+
+    deprecated_ids = []
+    for inst in eligible:
+        source_file = inst.get('_source_file')
+        if source_file:
+            path = Path(source_file)
+            if _move_to_deprecated(path, project):
+                deprecated_ids.append(inst.get('id', 'unknown'))
+
+    return deprecated_ids
+
+
+def _load_instincts_from_deprecated_dir(project: dict) -> list[dict]:
+    """Load instincts from deprecated/ directories (project + global)."""
+    instincts = []
+
+    # Project deprecated
+    if project.get("id") != "global":
+        project_dir = Path(project['project_dir'])
+        proj_deprecated = project_dir / "instincts" / "deprecated"
+        if proj_deprecated.exists():
+            instincts.extend(_load_instincts_from_dir(proj_deprecated, "personal", "project"))
+
+    # Global deprecated
+    if GLOBAL_DEPRECATED_DIR.exists():
+        instincts.extend(_load_instincts_from_dir(GLOBAL_DEPRECATED_DIR, "personal", "global"))
+
+    return instincts
+
+
 # ─────────────────────────────────────────────
 # Project Detection (Python equivalent of detect-project.sh)
 # ─────────────────────────────────────────────
@@ -277,6 +359,7 @@ def detect_project() -> dict:
     for d in [
         project_dir / "instincts" / "personal",
         project_dir / "instincts" / "inherited",
+        project_dir / "instincts" / "deprecated",
         project_dir / "observations.archive",
         project_dir / "evolved" / "skills",
         project_dir / "evolved" / "commands",
@@ -498,6 +581,8 @@ def cmd_status(args) -> int:
     if getattr(args, 'decay', True):
         _apply_confidence_decay(instincts)
 
+    deprecated_ids = _auto_deprecate(project)
+
     if not instincts:
         print("No instincts found.")
         print(f"\nProject: {project['name']} ({project['id']})")
@@ -538,6 +623,18 @@ def cmd_status(args) -> int:
             print(f"-" * 60)
             print(f"  Observations: {obs_count} events logged")
             print(f"  File: {obs_file}")
+
+    if deprecated_ids:
+        print(f"\n{'-'*60}")
+        print(f"  Deprecated: {len(deprecated_ids)} instinct(s) moved to deprecated/")
+
+    if getattr(args, 'show_deprecated', False):
+        deprecated = _load_instincts_from_deprecated_dir(project)
+        if deprecated:
+            print(f"\n{'-'*60}")
+            print(f"  Deprecated instincts ({len(deprecated)}):")
+            for inst in deprecated:
+                print(f"    - {inst.get('id', 'unknown')}")
 
     # Pending instinct stats
     pending = _collect_pending_instincts()
@@ -1476,6 +1573,8 @@ def main() -> int:
                               help='Apply confidence decay to display (default: enabled)')
     status_parser.add_argument('--no-decay', action='store_false', dest='decay',
                               help='Show original confidence without decay')
+    status_parser.add_argument('--show-deprecated', action='store_true',
+                              help='Include deprecated instincts in output')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')

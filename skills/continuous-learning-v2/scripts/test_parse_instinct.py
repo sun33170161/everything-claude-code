@@ -48,6 +48,9 @@ _update_registry = _mod._update_registry
 _calculate_decayed_confidence = _mod._calculate_decayed_confidence
 _apply_confidence_decay = _mod._apply_confidence_decay
 _get_instincts_eligible_for_deprecation = _mod._get_instincts_eligible_for_deprecation
+_move_to_deprecated = _mod._move_to_deprecated
+_auto_deprecate = _mod._auto_deprecate
+_load_instincts_from_deprecated_dir = _mod._load_instincts_from_deprecated_dir
 
 
 # ─────────────────────────────────────────────
@@ -91,10 +94,11 @@ def project_tree(tmp_path):
     projects_dir = homunculus / "projects"
     global_personal = homunculus / "instincts" / "personal"
     global_inherited = homunculus / "instincts" / "inherited"
+    global_deprecated = homunculus / "instincts" / "deprecated"
     global_evolved = homunculus / "evolved"
 
     for d in [
-        global_personal, global_inherited,
+        global_personal, global_inherited, global_deprecated,
         global_evolved / "skills", global_evolved / "commands", global_evolved / "agents",
         projects_dir,
     ]:
@@ -106,6 +110,7 @@ def project_tree(tmp_path):
         "projects_dir": projects_dir,
         "global_personal": global_personal,
         "global_inherited": global_inherited,
+        "global_deprecated": global_deprecated,
         "global_evolved": global_evolved,
         "registry_file": homunculus / "projects.json",
     }
@@ -119,6 +124,7 @@ def patch_globals(project_tree, monkeypatch):
     monkeypatch.setattr(_mod, "REGISTRY_FILE", project_tree["registry_file"])
     monkeypatch.setattr(_mod, "GLOBAL_PERSONAL_DIR", project_tree["global_personal"])
     monkeypatch.setattr(_mod, "GLOBAL_INHERITED_DIR", project_tree["global_inherited"])
+    monkeypatch.setattr(_mod, "GLOBAL_DEPRECATED_DIR", project_tree["global_deprecated"])
     monkeypatch.setattr(_mod, "GLOBAL_EVOLVED_DIR", project_tree["global_evolved"])
     monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", project_tree["homunculus"] / "observations.jsonl")
     return project_tree
@@ -1202,3 +1208,140 @@ Test.
     assert 'orig' in captured.out
     assert '41%' in captured.out
     assert '80% orig' in captured.out
+
+
+# ─────────────────────────────────────────────
+# Deprecate / Deprecated tests
+# ─────────────────────────────────────────────
+
+def test_move_to_deprecated(patch_globals):
+    """Moving a file to deprecated should succeed."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    inst_file = project["instincts_personal"] / "test.yaml"
+    inst_file.write_text("""\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+---
+
+## Action
+Test.
+""")
+    result = _move_to_deprecated(inst_file, project)
+    assert result == True
+    assert not inst_file.exists()
+    deprecated_dir = Path(str(project["instincts_personal"]).replace("/personal", "/deprecated"))
+    assert deprecated_dir.exists()
+    assert (deprecated_dir / "test.yaml").exists()
+
+
+def test_auto_deprecate_moves_low_confidence(patch_globals, monkeypatch):
+    """Instinct with decayed confidence < 0.3 should be auto-deprecated."""
+    from datetime import datetime, timezone, timedelta
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    past = datetime.now(timezone.utc) - timedelta(days=365)
+    inst_file = project["instincts_personal"] / "low.yaml"
+    inst_file.write_text(f"""\
+---
+id: low-confidence
+trigger: "when testing"
+confidence: 0.2
+domain: testing
+last_observed: {past.strftime("%Y-%m-%dT%H:%M:%SZ")}
+---
+
+## Action
+Do risky thing.
+""")
+
+    deprecated_ids = _auto_deprecate(project)
+    assert "low-confidence" in deprecated_ids
+    assert not inst_file.exists()
+    deprecated_dir = Path(str(project["instincts_personal"]).replace("/personal", "/deprecated"))
+    assert (deprecated_dir / "low.yaml").exists()
+
+
+def test_auto_deprecate_skips_high_confidence(patch_globals, monkeypatch):
+    """Instinct with high confidence should NOT be deprecated."""
+    from datetime import datetime, timezone, timedelta
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    past = datetime.now(timezone.utc) - timedelta(days=180)
+    inst_file = project["instincts_personal"] / "high.yaml"
+    inst_file.write_text(f"""\
+---
+id: high-confidence
+trigger: "when testing"
+confidence: 0.9
+domain: testing
+last_observed: {past.strftime("%Y-%m-%dT%H:%M:%SZ")}
+---
+
+## Action
+Safe practice.
+""")
+
+    deprecated_ids = _auto_deprecate(project)
+    assert "high-confidence" not in deprecated_ids
+    assert inst_file.exists()
+
+
+def test_auto_deprecate_skips_user_profile(patch_globals, monkeypatch):
+    """User-profile instincts should NOT be auto-deprecated even with low confidence."""
+    from datetime import datetime, timezone, timedelta
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    past = datetime.now(timezone.utc) - timedelta(days=365)
+    inst_file = project["instincts_personal"] / "user.yaml"
+    inst_file.write_text(f"""\
+---
+id: user-pref
+trigger: "when coding"
+confidence: 0.1
+domain: user-profile
+last_observed: {past.strftime("%Y-%m-%dT%H:%M:%SZ")}
+---
+
+## Action
+User preference.
+""")
+
+    deprecated_ids = _auto_deprecate(project)
+    assert "user-pref" not in deprecated_ids
+    assert inst_file.exists()
+
+
+def test_load_deprecated_instincts(patch_globals):
+    """load_all_instincts should NOT include deprecated by default."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    normal_file = project["instincts_personal"] / "normal.yaml"
+    normal_file.write_text("""\
+---
+id: normal
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+---
+
+## Action
+Test.
+""")
+    deprecated_dir = Path(str(project["instincts_personal"]).replace("/personal", "/deprecated"))
+    deprecated_dir.mkdir(parents=True, exist_ok=True)
+    dep_file = deprecated_dir / "deprecated.yaml"
+    dep_file.write_text("""\
+---
+id: deprecated-instinct
+trigger: "when old"
+confidence: 0.1
+domain: testing
+---
+
+## Action
+Old way.
+""")
+
+    instincts = load_all_instincts(project)
+    ids = [i['id'] for i in instincts]
+    assert "normal" in ids
+    assert "deprecated-instinct" not in ids
