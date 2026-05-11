@@ -27,7 +27,7 @@ import {
   clearChanges,
 } from "./lib/changed-files-store.js"
 import changedFilesTool from "./tools/changed-files.js"
-import { recordObservation } from "./lib/observation.js"
+import { recordObservation, recordUserPreference } from "./lib/observation.js"
 
 // Resolve project root by walking up from plugin dir until we find skills/
 // This works regardless of runtime mode (TS source, compiled ESM) or install depth
@@ -214,8 +214,8 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
 
       const firstUser = output.messages.find((m) => m.info?.role === "user")
       if (!firstUser || !firstUser.parts?.length) return
-      // Only inject once per session (use ECC-specific marker to avoid collision with superpowers plugin)
-      if (firstUser.parts.some((p) => p.type === "text" && p.text.includes("ECC_EXTREMELY_IMPORTANT"))) return
+      // Only inject once per session (use ECC-specific markers to avoid collision with superpowers plugin)
+      if (firstUser.parts.some((p) => p.type === "text" && (p.text.includes("ECC_EXTREMELY_IMPORTANT") || p.text.includes("###ECC_INSTINCTS_END###")))) return
       const ref = firstUser.parts[0]
 
       // Build CLv2 bootstrap
@@ -231,6 +231,44 @@ The CLv2 (Continuous Learning v2) skill content is included below. It is already
 ${content}
 </ECC_EXTREMELY_IMPORTANT>\n\n`
         }
+      }
+
+      // Build identity block (Task 9: identity.json injection)
+      const INSTINCT_CLI = process.env.ECC_INSTINCT_CLI || path.join(
+        projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py"
+      )
+      let identityBlock = ""
+      try {
+        const identityResult = await $`python3 ${INSTINCT_CLI} identity --format inject`.text()
+        if (identityResult.trim()) {
+          identityBlock = identityResult.trim() + "\n\n"
+        }
+      } catch {
+        // Best-effort identity injection
+      }
+
+      // Build instinct block (Task 7: high-confidence instinct injection)
+      let instinctBlock = ""
+      try {
+        const result = await $`python3 ${INSTINCT_CLI} status --no-decay --format json`.text()
+        const allInstincts: Array<Record<string, unknown>> = JSON.parse(result)
+        const highConf = allInstincts
+          .filter((i) => typeof i.confidence === "number" && (i.confidence as number) >= 0.7)
+          .sort((a, b) => (b.confidence as number) - (a.confidence as number))
+
+        if (highConf.length > 0) {
+          const projectName = path.basename(worktreePath)
+          let block = `## Active Instincts for ${projectName}\n`
+          for (const inst of highConf) {
+            const line = `- ${inst.domain} (${Math.round((inst.confidence as number) * 100)}%): ${inst.trigger}\n`
+            if ((block + line + "###ECC_INSTINCTS_END###").length > 2000) break
+            block += line
+          }
+          block += "\n###ECC_INSTINCTS_END###"
+          instinctBlock = block + "\n\n"
+        }
+      } catch {
+        // Best-effort instinct injection
       }
 
       // Build ECC commands reference from commands/ directory
@@ -251,7 +289,8 @@ ${content}
         }
       }
 
-      const injection = bootstrap + cmdHelp
+      // Injection order: CLv2 bootstrap, identity, instincts, commands
+      const injection = bootstrap + identityBlock + instinctBlock + cmdHelp
       if (!injection.trim()) return
 
       firstUser.parts.unshift({ ...ref, type: "text" as const, text: injection })
@@ -326,6 +365,22 @@ ${content}
           recordObservation(worktreePath, input.tool, input.args as Record<string, unknown> | undefined)
         } catch {
           // Observation failed silently
+        }
+      }
+
+      // Record user preference observations (Task 10)
+      if (hookEnabled("post:observe:user-prefs", ["standard", "strict"])) {
+        try {
+          const outputText = typeof output === "string" ? output : JSON.stringify(output || {})
+          // Detect correction/preference indicators in tool output
+          if (/\b(?:instead|rather|prefer|actually|no\s*[,;:])\b/i.test(outputText)) {
+            recordUserPreference(worktreePath, "correction", {
+              tool: input.tool,
+              source: "output_text",
+            })
+          }
+        } catch {
+          // Best-effort user preference observation
         }
       }
 
@@ -526,6 +581,23 @@ ${content}
      * Action: Final cleanup and state saving
      */
     "session.deleted": async () => {
+      // Auto-analyze session observations (Task 8: best-effort, with timeout)
+      if (hookEnabled("session:analyze", ["standard", "strict"]) && process.env.ECC_SESSION_ANALYSIS_ENABLED !== "false") {
+        const INSTINCT_CLI = process.env.ECC_INSTINCT_CLI || path.join(
+          projectRoot, "skills", "continuous-learning-v2", "scripts", "instinct-cli.py"
+        )
+        const timeout = parseInt(process.env.ECC_SESSION_ANALYSIS_TIMEOUT || "10000", 10)
+        try {
+          await Promise.race([
+            $`python3 ${INSTINCT_CLI} analyze --no-interactive`,
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeout)),
+          ])
+          log("info", "[ECC] Session analysis complete")
+        } catch (e) {
+          log("warn", `[ECC] Session analysis skipped: ${(e as Error).message}`)
+        }
+      }
+
       if (!hookEnabled("session:end-marker", ["minimal", "standard", "strict"])) return
 
       log("info", "[ECC] Session ended - cleaning up")
@@ -586,6 +658,8 @@ ${content}
         ECC_HOOK_PROFILE: currentProfile,
         ECC_DISABLED_HOOKS: process.env.ECC_DISABLED_HOOKS || "",
         ECC_INSTINCT_CLI: instinctCliPath,
+        ECC_SESSION_ANALYSIS_ENABLED: process.env.ECC_SESSION_ANALYSIS_ENABLED || "true",
+        ECC_SESSION_ANALYSIS_TIMEOUT: process.env.ECC_SESSION_ANALYSIS_TIMEOUT || "10000",
         PROJECT_ROOT: worktreePath,
       }
 

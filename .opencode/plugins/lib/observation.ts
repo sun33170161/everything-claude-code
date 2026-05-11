@@ -120,3 +120,16 @@ export function recordObservation(
 
   fs.appendFileSync(project.observationsFile, JSON.stringify(observation) + "\n")
 }
+
+export function recordUserPreference(
+  worktree: string,
+  preferenceType: "correction" | "style" | "language",
+  details: Record<string, unknown>
+): void {
+  const eventMap: Record<string, string> = {
+    correction: "user_preference_correction",
+    style: "user_preference_style",
+    language: "user_preference_language",
+  }
+  recordObservation(worktree, "user_preference", details, eventMap[preferenceType])
+}

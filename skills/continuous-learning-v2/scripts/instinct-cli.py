@@ -674,6 +674,23 @@ def cmd_status(args) -> int:
     """Show status of all instincts (project + global)."""
     project = detect_project()
 
+    # JSON format: output clean JSON for programmatic consumption
+    if getattr(args, 'format', 'text') == 'json':
+        instincts = load_all_instincts(project)
+        if getattr(args, 'decay', True):
+            _apply_confidence_decay(instincts)
+        if getattr(args, 'domain', None):
+            instincts = [i for i in instincts if i.get('domain') == args.domain]
+        output = [{
+            'id': inst.get('id'),
+            'trigger': inst.get('trigger', ''),
+            'confidence': inst.get('confidence', 0.5),
+            'domain': inst.get('domain', 'general'),
+        } for inst in instincts]
+        json.dump(output, sys.stdout)
+        print()
+        return 0
+
     if getattr(args, 'show_identity', False):
         identity = _load_identity()
         errors = _validate_identity(identity)
@@ -1880,6 +1897,47 @@ def cmd_prune(args) -> int:
 
 
 # ─────────────────────────────────────────────
+# Identity Command
+# ─────────────────────────────────────────────
+
+def cmd_identity(args) -> int:
+    """Show user identity information.
+
+    With --format inject, outputs a compact formatted block suitable for
+    injection into AI prompts (used by the messages.transform hook).
+    With --format text, prints a human-readable profile display.
+    """
+    identity = _load_identity()
+
+    if args.format == 'inject':
+        text = _inject_identity_prompt(identity)
+        if text:
+            print(text)
+        return 0
+
+    # Text format: human-readable display
+    errors = _validate_identity(identity)
+    print(f"\n{'='*60}")
+    print(f"  USER PROFILE")
+    print(f"{'='*60}\n")
+    print(f"  Technical Level:  {identity.get('technical_level', 'unknown')}")
+    print(f"  Communication:    {identity.get('preferences', {}).get('communication_style', 'unknown')}")
+    print(f"  Language:         {identity.get('preferences', {}).get('response_language', 'unknown')}")
+    print(f"  Type Hints:       {identity.get('preferences', {}).get('likes_type_hints', True)}")
+    print(f"  Comments:         {identity.get('preferences', {}).get('likes_comments', 'unknown')}")
+    if identity.get('expertise_areas'):
+        print(f"  Expertise:        {', '.join(identity['expertise_areas'][:10])}")
+    if identity.get('name'):
+        print(f"  Name:             {identity['name']}")
+    if errors:
+        print(f"\n  Validation issues:")
+        for err in errors:
+            print(f"    - {err}")
+    print()
+    return 0
+
+
+# ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
 
@@ -1900,7 +1958,9 @@ def main() -> int:
     status_parser.add_argument('--domain', type=str, default=None,
                               help='Filter by domain (e.g., user-profile)')
     status_parser.add_argument('--show-identity', action='store_true',
-                              help='Show user identity profile')
+                               help='Show user identity profile')
+    status_parser.add_argument('--format', choices=['text', 'json'], default='text',
+                               help='Output format (text for human, json for programmatic)')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')
@@ -1947,6 +2007,11 @@ def main() -> int:
     analyze_parser.add_argument('--min-observations', type=int, default=20,
                                 help='Minimum observations to analyze (default: 20)')
 
+    # Identity
+    identity_parser = subparsers.add_parser('identity', help='Show user identity information')
+    identity_parser.add_argument('--format', choices=['text', 'inject'], default='text',
+                                 help='Output format (text for human, inject for prompt injection)')
+
     args = parser.parse_args()
 
     if args.command == 'status':
@@ -1965,6 +2030,8 @@ def main() -> int:
         return cmd_prune(args)
     elif args.command == 'analyze':
         return cmd_analyze(args)
+    elif args.command == 'identity':
+        return cmd_identity(args)
     else:
         parser.print_help()
         return 1
