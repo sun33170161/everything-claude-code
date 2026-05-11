@@ -568,6 +568,12 @@ def load_project_only_instincts(project: dict) -> list[dict]:
     return load_all_instincts(project, include_global=False)
 
 
+def _load_user_profile_instincts(project: dict) -> list[dict]:
+    """Return only domain: user-profile instincts (project + global)."""
+    instincts = load_all_instincts(project)
+    return [i for i in instincts if i.get('domain') == 'user-profile']
+
+
 # ─────────────────────────────────────────────
 # Status Command
 # ─────────────────────────────────────────────
@@ -582,6 +588,9 @@ def cmd_status(args) -> int:
         _apply_confidence_decay(instincts)
 
     deprecated_ids = _auto_deprecate(project)
+
+    if getattr(args, 'domain', None):
+        instincts = [i for i in instincts if i.get('domain') == args.domain]
 
     if not instincts:
         print("No instincts found.")
@@ -601,6 +610,10 @@ def cmd_status(args) -> int:
         print(f"  Project:  {project['name']} ({project['id']})")
         print(f"  Project instincts: {len(project_instincts)}")
         print(f"  Global instincts:  {len(global_instincts)}")
+
+        user_profile_count = len([i for i in instincts if i.get('domain') == 'user-profile'])
+        if user_profile_count:
+            print(f"  User-profile instincts: {user_profile_count}")
         print()
 
         # Print project-scoped instincts
@@ -660,41 +673,57 @@ def cmd_status(args) -> int:
     return 0
 
 
+def _print_instinct_group(instincts: list[dict], title: str, marker: str = "") -> None:
+    """Helper to print a group of instincts with a title and optional marker."""
+    print(f"  ### {marker} {title.upper()} ({len(instincts)})")
+    print()
+
+    for inst in sorted(instincts, key=lambda x: -x.get('confidence', 0.5)):
+        conf = inst.get('confidence', 0.5)
+        conf_bar = '\u2588' * int(conf * 10) + '\u2591' * (10 - int(conf * 10))
+        trigger = inst.get('trigger', 'unknown trigger')
+        scope_tag = f"[{inst.get('scope', '?')}]"
+
+        orig = inst.get('original_confidence')
+        if orig is not None and orig != conf:
+            conf_display = f"{int(conf*100):3d}% ({int(orig*100):3d}% orig)"
+        else:
+            conf_display = f"{int(conf*100):3d}%"
+
+        print(f"    {conf_bar} {conf_display}  {inst.get('id', 'unnamed')} {scope_tag}")
+        print(f"              trigger: {trigger}")
+
+        # Extract action from content
+        content = inst.get('content', '')
+        action_match = re.search(r'## Action\s*\n\s*(.+?)(?:\n\n|\n##|$)', content, re.DOTALL)
+        if action_match:
+            action = action_match.group(1).strip().split('\n')[0]
+            print(f"              action: {action[:60]}{'...' if len(action) > 60 else ''}")
+
+        print()
+
+
 def _print_instincts_by_domain(instincts: list[dict]) -> None:
-    """Helper to print instincts grouped by domain."""
+    """Helper to print instincts grouped by domain.
+    
+    User-profile domain instincts are shown in a separate section first with [USER] marker.
+    """
     by_domain = defaultdict(list)
+    user_profile_instincts = []
+
     for inst in instincts:
         domain = inst.get('domain', 'general')
-        by_domain[domain].append(inst)
+        if domain == 'user-profile':
+            user_profile_instincts.append(inst)
+        else:
+            by_domain[domain].append(inst)
+
+    if user_profile_instincts:
+        _print_instinct_group(user_profile_instincts, "user-profile", "[USER]")
 
     for domain in sorted(by_domain.keys()):
         domain_instincts = by_domain[domain]
-        print(f"  ### {domain.upper()} ({len(domain_instincts)})")
-        print()
-
-        for inst in sorted(domain_instincts, key=lambda x: -x.get('confidence', 0.5)):
-            conf = inst.get('confidence', 0.5)
-            conf_bar = '\u2588' * int(conf * 10) + '\u2591' * (10 - int(conf * 10))
-            trigger = inst.get('trigger', 'unknown trigger')
-            scope_tag = f"[{inst.get('scope', '?')}]"
-
-            orig = inst.get('original_confidence')
-            if orig is not None and orig != conf:
-                conf_display = f"{int(conf*100):3d}% ({int(orig*100):3d}% orig)"
-            else:
-                conf_display = f"{int(conf*100):3d}%"
-
-            print(f"    {conf_bar} {conf_display}  {inst.get('id', 'unnamed')} {scope_tag}")
-            print(f"              trigger: {trigger}")
-
-            # Extract action from content
-            content = inst.get('content', '')
-            action_match = re.search(r'## Action\s*\n\s*(.+?)(?:\n\n|\n##|$)', content, re.DOTALL)
-            if action_match:
-                action = action_match.group(1).strip().split('\n')[0]
-                print(f"              action: {action[:60]}{'...' if len(action) > 60 else ''}")
-
-            print()
+        _print_instinct_group(domain_instincts, domain)
 
 
 # ─────────────────────────────────────────────
@@ -1575,6 +1604,8 @@ def main() -> int:
                               help='Show original confidence without decay')
     status_parser.add_argument('--show-deprecated', action='store_true',
                               help='Include deprecated instincts in output')
+    status_parser.add_argument('--domain', type=str, default=None,
+                              help='Filter by domain (e.g., user-profile)')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')

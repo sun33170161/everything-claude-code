@@ -51,6 +51,7 @@ _get_instincts_eligible_for_deprecation = _mod._get_instincts_eligible_for_depre
 _move_to_deprecated = _mod._move_to_deprecated
 _auto_deprecate = _mod._auto_deprecate
 _load_instincts_from_deprecated_dir = _mod._load_instincts_from_deprecated_dir
+_load_user_profile_instincts = _mod._load_user_profile_instincts
 
 
 # ─────────────────────────────────────────────
@@ -1345,3 +1346,126 @@ Old way.
     ids = [i['id'] for i in instincts]
     assert "normal" in ids
     assert "deprecated-instinct" not in ids
+
+
+def test_user_profile_instinct_separate_section(patch_globals, monkeypatch, capsys):
+    """User-profile instincts should appear in a separate section."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    (project["instincts_personal"] / "user.yaml").write_text("""\
+---
+id: user-style
+trigger: "when communicating"
+confidence: 0.8
+domain: user-profile
+---
+
+## Action
+Prefer concise responses.
+""")
+    (project["instincts_personal"] / "code.yaml").write_text("""\
+---
+id: code-style
+trigger: "when writing code"
+confidence: 0.7
+domain: code-style
+---
+
+## Action
+Use functional patterns.
+""")
+
+    args = SimpleNamespace(decay=True, min_confidence=0.0, domain=None, show_deprecated=False, show_config=False, show_identity=False, format='normal')
+    result = cmd_status(args)
+    captured = capsys.readouterr()
+    assert '[USER]' in captured.out or 'user-profile'.upper() in captured.out
+    assert 'code-style' in captured.out
+    assert 'user-style' in captured.out
+
+
+def test_status_shows_user_profile_count(patch_globals, monkeypatch, capsys):
+    """Status header should show user-profile instinct count."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    (project["instincts_personal"] / "user.yaml").write_text("""\
+---
+id: user-style
+trigger: "when communicating"
+confidence: 0.8
+domain: user-profile
+---
+
+## Action
+Prefer concise.
+""")
+
+    args = SimpleNamespace(decay=True, min_confidence=0.0, domain=None, show_deprecated=False, show_config=False, show_identity=False, format='normal')
+    result = cmd_status(args)
+    captured = capsys.readouterr()
+    assert 'User-profile' in captured.out or 'user-profile' in captured.out
+
+
+def test_status_domain_filter(patch_globals, monkeypatch, capsys):
+    """--domain user-profile filter should show only user-profile instincts."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    (project["instincts_personal"] / "user.yaml").write_text("""\
+---
+id: user-style
+trigger: "when communicating"
+confidence: 0.8
+domain: user-profile
+---
+## Action
+Prefer concise.
+""")
+    (project["instincts_personal"] / "code.yaml").write_text("""\
+---
+id: code-style
+trigger: "when writing code"
+confidence: 0.7
+domain: code-style
+---
+## Action
+Use patterns.
+""")
+
+    args = SimpleNamespace(decay=True, min_confidence=0.0, domain='user-profile', show_deprecated=False, show_config=False, show_identity=False, format='normal')
+    result = cmd_status(args)
+    captured = capsys.readouterr()
+    assert 'user-style' in captured.out
+    assert 'code-style' not in captured.out
+
+
+def test_load_user_profile_instincts(patch_globals):
+    """_load_user_profile_instincts should return only user-profile instincts."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+
+    (project["instincts_personal"] / "user.yaml").write_text("""\
+---
+id: user-style
+trigger: "when communicating"
+confidence: 0.8
+domain: user-profile
+---
+## Action
+Prefer concise.
+""")
+    (project["instincts_personal"] / "code.yaml").write_text("""\
+---
+id: code-style
+trigger: "when writing code"
+confidence: 0.7
+domain: code-style
+---
+## Action
+Use patterns.
+""")
+
+    result = _load_user_profile_instincts(project)
+    ids = [i['id'] for i in result]
+    assert 'user-style' in ids
+    assert 'code-style' not in ids
