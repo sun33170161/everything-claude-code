@@ -60,6 +60,10 @@ PENDING_TTL_DAYS = 30
 # Warning threshold: show expiry warning when instinct expires within this many days
 PENDING_EXPIRY_WARNING_DAYS = 7
 
+# Confidence decay settings (for instincts with last_observed)
+CONFIDENCE_DECAY_PER_30DAYS = 0.8
+CONFIDENCE_DECAY_HIGH_RATE = 0.9  # For instincts with confidence >= 0.9 (decay slower)
+
 # Ensure global directories exist (deferred to avoid side effects at import time)
 def _ensure_global_dirs():
     for d in [GLOBAL_PERSONAL_DIR, GLOBAL_INHERITED_DIR,
@@ -154,6 +158,58 @@ def _update_last_observed(file_path: Path) -> None:
 
     if has_last_observed:
         file_path.write_text('\n'.join(new_lines), encoding="utf-8")
+
+
+# ─────────────────────────────────────────────
+# Confidence Decay
+# ─────────────────────────────────────────────
+
+def _calculate_decayed_confidence(instinct: dict, current_date: Optional[datetime] = None) -> float:
+    """Calculate decayed confidence based on last_observed field.
+
+    Formula: decayed = original * (decay_rate ** (days_since_last_observed / 30))
+    Instincts with original confidence >= 0.9 use CONFIDENCE_DECAY_HIGH_RATE (0.9) instead of 0.8.
+    Rounds to 2 decimal places. Floors at 0.0.
+    """
+    if current_date is None:
+        current_date = datetime.now(timezone.utc)
+
+    original = instinct.get('confidence', 0.5)
+    last_observed_str = instinct.get('last_observed')
+
+    if not last_observed_str:
+        return original
+
+    try:
+        last_dt = datetime.fromisoformat(last_observed_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        return original
+
+    days_since = (current_date - last_dt).total_seconds() / 86400.0
+    if days_since <= 0:
+        return original
+
+    rate = CONFIDENCE_DECAY_HIGH_RATE if original >= 0.9 else CONFIDENCE_DECAY_PER_30DAYS
+    decayed = original * (rate ** (days_since / 30.0))
+    return max(0.0, round(decayed, 2))
+
+
+def _apply_confidence_decay(instincts: list[dict]) -> list[dict]:
+    """Mutate instincts in-place: add 'original_confidence' and update 'confidence' to decayed value.
+
+    Stores original confidence before applying decay. Instincts without last_observed are unchanged.
+    Returns the list for chaining.
+    """
+    for inst in instincts:
+        if inst.get('last_observed'):
+            inst['original_confidence'] = inst.get('confidence', 0.5)
+            inst['confidence'] = _calculate_decayed_confidence(inst)
+    return instincts
+
+
+def _get_instincts_eligible_for_deprecation(instincts: list[dict]) -> list[dict]:
+    """Return instincts whose decayed confidence is below 0.3."""
+    return [i for i in instincts if i.get('confidence', 0.5) < 0.3]
 
 
 # ─────────────────────────────────────────────
@@ -438,6 +494,10 @@ def cmd_status(args) -> int:
     project = detect_project()
     instincts = load_all_instincts(project)
 
+    # Apply confidence decay if enabled (default)
+    if getattr(args, 'decay', True):
+        _apply_confidence_decay(instincts)
+
     if not instincts:
         print("No instincts found.")
         print(f"\nProject: {project['name']} ({project['id']})")
@@ -521,7 +581,13 @@ def _print_instincts_by_domain(instincts: list[dict]) -> None:
             trigger = inst.get('trigger', 'unknown trigger')
             scope_tag = f"[{inst.get('scope', '?')}]"
 
-            print(f"    {conf_bar} {int(conf*100):3d}%  {inst.get('id', 'unnamed')} {scope_tag}")
+            orig = inst.get('original_confidence')
+            if orig is not None and orig != conf:
+                conf_display = f"{int(conf*100):3d}% ({int(orig*100):3d}% orig)"
+            else:
+                conf_display = f"{int(conf*100):3d}%"
+
+            print(f"    {conf_bar} {conf_display}  {inst.get('id', 'unnamed')} {scope_tag}")
             print(f"              trigger: {trigger}")
 
             # Extract action from content
@@ -1406,6 +1472,10 @@ def main() -> int:
 
     # Status
     status_parser = subparsers.add_parser('status', help='Show instinct status (project + global)')
+    status_parser.add_argument('--decay', action='store_true', dest='decay', default=True,
+                              help='Apply confidence decay to display (default: enabled)')
+    status_parser.add_argument('--no-decay', action='store_false', dest='decay',
+                              help='Show original confidence without decay')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')

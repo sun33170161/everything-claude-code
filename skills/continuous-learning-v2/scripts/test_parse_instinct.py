@@ -45,6 +45,9 @@ _find_cross_project_instincts = _mod._find_cross_project_instincts
 load_registry = _mod.load_registry
 _validate_instinct_id = _mod._validate_instinct_id
 _update_registry = _mod._update_registry
+_calculate_decayed_confidence = _mod._calculate_decayed_confidence
+_apply_confidence_decay = _mod._apply_confidence_decay
+_get_instincts_eligible_for_deprecation = _mod._get_instincts_eligible_for_deprecation
 
 
 # ─────────────────────────────────────────────
@@ -1047,3 +1050,155 @@ def test_update_registry_atomic_replaces_file(patch_globals):
     assert "abc123" in data
     leftovers = list(tree["registry_file"].parent.glob(".projects.json.tmp.*"))
     assert leftovers == []
+
+
+# ─────────────────────────────────────────────
+# Confidence Decay Tests
+# ─────────────────────────────────────────────
+
+def test_confidence_decay_calculation():
+    """Instinct with last_observed=90 days ago, confidence=0.8 → decayed to ~0.41."""
+    from datetime import datetime, timezone, timedelta
+    past = datetime.now(timezone.utc) - timedelta(days=90)
+    instinct = {
+        'id': 'test',
+        'confidence': 0.8,
+        'last_observed': past.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    decayed = _calculate_decayed_confidence(instinct)
+    # 0.8 * (0.8 ** (90/30)) = 0.8 * 0.8^3 = 0.8 * 0.512 = 0.4096 ≈ 0.41
+    assert decayed == pytest.approx(0.41, abs=0.02)
+
+
+def test_confidence_decay_no_decay_recent():
+    """Instinct with last_observed=today should keep original confidence."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    instinct = {
+        'id': 'test',
+        'confidence': 0.8,
+        'last_observed': now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    decayed = _calculate_decayed_confidence(instinct)
+    assert decayed == 0.8
+
+
+def test_confidence_decay_no_last_observed():
+    """Instinct without last_observed should return original confidence."""
+    instinct = {'id': 'test', 'confidence': 0.8}
+    decayed = _calculate_decayed_confidence(instinct)
+    assert decayed == 0.8
+
+
+def test_confidence_decay_high_rate():
+    """Instinct with confidence >= 0.9 should decay at slower rate (0.9)."""
+    from datetime import datetime, timezone, timedelta
+    past = datetime.now(timezone.utc) - timedelta(days=90)
+    instinct = {
+        'id': 'test',
+        'confidence': 0.95,
+        'last_observed': past.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    decayed = _calculate_decayed_confidence(instinct)
+    # 0.95 * (0.9 ** 3) = 0.95 * 0.729 = 0.69255 ≈ 0.69
+    assert decayed == pytest.approx(0.69, abs=0.02)
+
+
+def test_confidence_decay_floor_at_zero():
+    """Very old instincts should floor at 0.0 (not go negative)."""
+    from datetime import datetime, timezone, timedelta
+    far_past = datetime.now(timezone.utc) - timedelta(days=3650)
+    instinct = {
+        'id': 'test',
+        'confidence': 0.5,
+        'last_observed': far_past.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    decayed = _calculate_decayed_confidence(instinct)
+    assert decayed == 0.0
+
+
+def test_apply_confidence_decay_adds_original():
+    """_apply_confidence_decay should store original confidence."""
+    from datetime import datetime, timezone, timedelta
+    past = datetime.now(timezone.utc) - timedelta(days=30)
+    instincts = [{
+        'id': 'test',
+        'confidence': 0.8,
+        'last_observed': past.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }]
+    _apply_confidence_decay(instincts)
+    assert instincts[0]['original_confidence'] == 0.8
+    assert instincts[0]['confidence'] < 0.8
+
+
+def test_apply_confidence_decay_no_last_observed_unchanged():
+    """Instincts without last_observed should not be modified."""
+    instincts = [{'id': 'test', 'confidence': 0.8}]
+    _apply_confidence_decay(instincts)
+    assert 'original_confidence' not in instincts[0]
+    assert instincts[0]['confidence'] == 0.8
+
+
+def test_get_instincts_eligible_for_deprecation():
+    """Instincts below 0.3 should be returned."""
+    instincts = [
+        {'id': 'low', 'confidence': 0.2},
+        {'id': 'high', 'confidence': 0.8},
+        {'id': 'mid', 'confidence': 0.3},
+    ]
+    eligible = _get_instincts_eligible_for_deprecation(instincts)
+    assert len(eligible) == 1
+    assert eligible[0]['id'] == 'low'
+
+
+def test_confidence_decay_status_no_decay_flag(patch_globals, monkeypatch, capsys):
+    """--no-decay flag should show original confidence values."""
+    from datetime import datetime, timezone, timedelta
+    past = datetime.now(timezone.utc) - timedelta(days=90)
+
+    inst_file = patch_globals['global_personal'] / 'test.yaml'
+    inst_file.write_text(f"""\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+last_observed: {past.strftime("%Y-%m-%dT%H:%M:%SZ")}
+---
+
+## Action
+Test.
+""")
+
+    args = SimpleNamespace(decay=False, min_confidence=0.0, domain=None, show_deprecated=False, show_config=False, show_identity=False, format='normal')
+    result = cmd_status(args)
+    captured = capsys.readouterr()
+    assert '80%' in captured.out
+    assert 'orig' not in captured.out
+
+
+def test_confidence_decay_status_decay_flag(patch_globals, monkeypatch, capsys):
+    """With decay enabled (default), should show original in parentheses."""
+    from datetime import datetime, timezone, timedelta
+    past = datetime.now(timezone.utc) - timedelta(days=90)
+
+    inst_file = patch_globals['global_personal'] / 'test.yaml'
+    inst_file.write_text(f"""\
+---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+last_observed: {past.strftime("%Y-%m-%dT%H:%M:%SZ")}
+---
+
+## Action
+Test.
+""")
+
+    args = SimpleNamespace(decay=True, min_confidence=0.0, domain=None, show_deprecated=False, show_config=False, show_identity=False, format='normal')
+    result = cmd_status(args)
+    captured = capsys.readouterr()
+    assert 'orig' in captured.out
+    assert '41%' in captured.out
+    assert '80% orig' in captured.out
