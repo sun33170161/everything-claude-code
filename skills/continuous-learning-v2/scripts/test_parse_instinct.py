@@ -54,6 +54,7 @@ _load_instincts_from_deprecated_dir = _mod._load_instincts_from_deprecated_dir
 _load_user_profile_instincts = _mod._load_user_profile_instincts
 _load_identity = _mod._load_identity
 _validate_identity = _mod._validate_identity
+cmd_analyze = _mod.cmd_analyze
 _create_default_identity = _mod._create_default_identity
 _inject_identity_prompt = _mod._inject_identity_prompt
 IDENTITY_FILE = _mod.IDENTITY_FILE
@@ -1558,3 +1559,114 @@ def test_identity_inject_custom():
     assert "Test User" in text
     assert "python" in text
     assert len(text) <= 500
+
+
+# ─────────────────────────────────────────────
+# cmd_analyze tests
+# ─────────────────────────────────────────────
+
+def _write_observations(project: dict, tool: str, count: int, event: str = "tool_complete"):
+    """Helper to write observations to a project's observations file."""
+    obs_file = Path(project["observations_file"])
+    obs_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(obs_file, "a") as f:
+        for i in range(count):
+            obs = {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "event": event,
+                "tool": tool,
+                "args": "{}",
+                "project_id": project["id"],
+                "project_name": project["name"],
+            }
+            f.write(json.dumps(obs) + "\n")
+
+
+def test_analyze_insufficient_observations(patch_globals, monkeypatch, capsys):
+    """Analyze with <20 observations should skip."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+    _write_observations(project, "read", 5)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    captured = capsys.readouterr()
+    assert "Need at least" in captured.out
+    assert result == 0
+
+
+def test_analyze_with_sufficient_observations(patch_globals, monkeypatch, capsys):
+    """Analyze with >=20 observations should find patterns."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+    _write_observations(project, "edit", 25)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    captured = capsys.readouterr()
+    assert "Patterns found" in captured.out or "edit" in captured.out
+    pending_dir = project["project_dir"] / "instincts" / "pending"
+    pending_files = list(pending_dir.glob("*.yaml")) if pending_dir.exists() else []
+    assert len(pending_files) >= 1
+    assert result == 0
+
+
+def test_analyze_dry_run(patch_globals, monkeypatch, capsys):
+    """Analyze --dry-run should not create files."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+    _write_observations(project, "write", 25)
+
+    args = SimpleNamespace(dry_run=True, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    captured = capsys.readouterr()
+    assert "DRY RUN" in captured.out
+    pending_dir = project["project_dir"] / "instincts" / "pending"
+    pending_files = list(pending_dir.glob("*.yaml")) if pending_dir.exists() else []
+    assert len(pending_files) == 0
+    assert result == 0
+
+
+def test_analyze_no_observations(patch_globals, monkeypatch, capsys):
+    """Analyze with no observations file should no-op."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    captured = capsys.readouterr()
+    assert "No observations file found" in captured.out
+    assert result == 0
+
+
+def test_analyze_multiple_tools(patch_globals, monkeypatch, capsys):
+    """Analyze with observations from multiple tools should find patterns for each."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    _write_observations(project, "edit", 15)
+    _write_observations(project, "read", 15)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    assert result == 0
+
+
+def test_analyze_idempotent(patch_globals, monkeypatch, capsys):
+    """Running analyze twice should not create duplicate pending instincts."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+    _write_observations(project, "edit", 25)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    cmd_analyze(args)
+    capsys.readouterr()
+
+    pending_dir = project["project_dir"] / "instincts" / "pending"
+    first_count = len(list(pending_dir.glob("*.yaml"))) if pending_dir.exists() else 0
+
+    cmd_analyze(args)
+    capsys.readouterr()
+
+    second_count = len(list(pending_dir.glob("*.yaml"))) if pending_dir.exists() else 0
+    assert first_count == second_count

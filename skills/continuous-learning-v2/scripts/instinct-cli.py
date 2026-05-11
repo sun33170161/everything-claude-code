@@ -1223,6 +1223,183 @@ def cmd_evolve(args) -> int:
 
 
 # ─────────────────────────────────────────────
+# Analyze Command
+# ─────────────────────────────────────────────
+
+def _analyze_observations(project: dict, args) -> int:
+    """Analyze observations for a single project and create pending instincts."""
+    obs_file = project.get("observations_file")
+
+    if not obs_file or not Path(obs_file).exists():
+        print("No observations file found.")
+        return 0
+
+    try:
+        with open(obs_file, encoding="utf-8") as f:
+            observations = [json.loads(line) for line in f if line.strip()]
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error reading observations: {e}", file=sys.stderr)
+        return 0
+
+    min_obs = getattr(args, 'min_observations', 20)
+    if len(observations) < min_obs:
+        print(f"Need at least {min_obs} observations to analyze. Currently have {len(observations)}.")
+        return 0
+
+    event_counts = defaultdict(int)
+    tool_counts = defaultdict(int)
+    for obs in observations:
+        event_counts[obs.get('event', 'unknown')] += 1
+        tool_counts[obs.get('tool', 'unknown')] += 1
+
+    print(f"\n{'='*60}")
+    print(f"  ANALYSIS - {len(observations)} observations")
+    print(f"  Project: {project.get('name', 'unknown')} ({project.get('id', '?')})")
+    print(f"{'='*60}\n")
+
+    print(f"  Events by type:")
+    for event, count in sorted(event_counts.items(), key=lambda x: -x[1]):
+        print(f"    {event}: {count}")
+
+    print(f"\n  Tools used:")
+    for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:10]:
+        print(f"    {tool}: {count}")
+
+    tool_observations = defaultdict(list)
+    for obs in observations:
+        tool = obs.get('tool', 'unknown')
+        tool_observations[tool].append(obs)
+
+    pending_dir = project.get('project_dir') and Path(project['project_dir']) / "instincts" / "pending"
+    if not pending_dir or project.get('id') == 'global':
+        pending_dir = GLOBAL_INSTINCTS_DIR / "pending"
+
+    dry_run = getattr(args, 'dry_run', False)
+    pending_created = []
+
+    for tool, tool_obs in tool_observations.items():
+        count = len(tool_obs)
+        if count < 3:
+            continue
+
+        confidence = min(0.9, round(0.3 + 0.6 * (count / 100), 2))
+        pname = project.get('name', 'project')
+        pid = project.get('id', 'unknown')
+
+        if tool in ('read', 'glob', 'grep', 'search', 'find'):
+            instinct_id = f"use-{tool}-for-research"
+            trigger = f"when researching code in {pname}"
+            action = f"Use '{tool}' tool to search and explore the codebase before making changes"
+            domain = "workflow"
+        elif tool == 'edit':
+            instinct_id = f"edit-files-in-{pname}"
+            trigger = f"when making changes in {pname}"
+            action = "Edit files to implement changes"
+            domain = "workflow"
+        elif tool == 'write':
+            instinct_id = f"write-new-files-{pname}"
+            trigger = f"when creating new files in {pname}"
+            action = "Write new files for the project"
+            domain = "workflow"
+        elif tool == 'bash':
+            instinct_id = f"run-commands-{pname}"
+            trigger = f"when executing commands in {pname}"
+            action = "Run shell commands for build, test, or deployment tasks"
+            domain = "workflow"
+        else:
+            continue
+
+        if not dry_run:
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            now = datetime.now(timezone.utc)
+            content = f"""\
+---
+id: {instinct_id}
+trigger: {_yaml_quote(trigger)}
+confidence: {confidence}
+domain: {domain}
+source: analyzed
+scope: project
+project_id: {pid}
+project_name: {pname}
+created: {now.strftime('%Y-%m-%dT%H:%M:%SZ')}
+observations: {count}
+---
+
+## Action
+{action}
+
+## Evidence
+Analyzed from {count} observations of tool '{tool}' in {pname}.
+"""
+            pending_file = pending_dir / f"{instinct_id}.yaml"
+            if not pending_file.exists():
+                pending_file.write_text(content, encoding="utf-8")
+
+        pending_created.append({
+            'id': instinct_id,
+            'tool': tool,
+            'confidence': confidence,
+            'observations': count,
+        })
+
+    if pending_created:
+        print(f"\n  Patterns found: {len(pending_created)}")
+        for p in pending_created:
+            print(f"\n    + {p['id']}")
+            print(f"      Tool: {p['tool']}, Confidence: {p['confidence']:.0%}, Observations: {p['observations']}")
+    else:
+        print(f"\n  No significant patterns found (need ≥3 observations of same tool).")
+
+    if dry_run and pending_created:
+        print(f"\n  [DRY RUN] No files were written.")
+
+    print(f"\n{'-'*60}")
+    print(f"  Total observations: {len(observations)}")
+    print(f"  Unique tools: {len(tool_observations)}")
+    print(f"  Pending created: {len(pending_created)}")
+
+    if not dry_run:
+        deprecated = _auto_deprecate(project)
+        if deprecated:
+            print(f"  Deprecated: {len(deprecated)} instinct(s)")
+
+    print(f"\n{'='*60}\n")
+    return 0
+
+
+def cmd_analyze(args) -> int:
+    """Analyze observations and create pending instincts.
+
+    Reads observations.jsonl, groups by tool patterns, and creates pending instinct
+    files for repeated patterns. Supports --dry-run for preview and --all-projects
+    for batch analysis.
+    """
+    if getattr(args, 'all_projects', False):
+        registry = load_registry()
+        if not registry:
+            print("No projects registered.")
+            return 0
+        for pid, pinfo in registry.items():
+            project_dir = PROJECTS_DIR / pid
+            project = {
+                "id": pid,
+                "name": pinfo.get('name', pid),
+                "root": pinfo.get('root', ''),
+                "project_dir": project_dir,
+                "instincts_personal": project_dir / "instincts" / "personal",
+                "instincts_inherited": project_dir / "instincts" / "inherited",
+                "evolved_dir": project_dir / "evolved",
+                "observations_file": project_dir / "observations.jsonl",
+            }
+            _analyze_observations(project, args)
+        return 0
+    else:
+        project = detect_project()
+        return _analyze_observations(project, args)
+
+
+# ─────────────────────────────────────────────
 # Promote Command
 # ─────────────────────────────────────────────
 
@@ -1762,6 +1939,14 @@ def main() -> int:
     prune_parser.add_argument('--dry-run', action='store_true', help='Preview without deleting')
     prune_parser.add_argument('--quiet', action='store_true', help='Suppress output (for automated use)')
 
+    # Analyze
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze observations and create pending instincts')
+    analyze_parser.add_argument('--dry-run', action='store_true', help='Preview without creating files')
+    analyze_parser.add_argument('--all-projects', action='store_true', help='Analyze all registered projects')
+    analyze_parser.add_argument('--no-interactive', action='store_true', help='Suppress interactive prompts (for hook use)')
+    analyze_parser.add_argument('--min-observations', type=int, default=20,
+                                help='Minimum observations to analyze (default: 20)')
+
     args = parser.parse_args()
 
     if args.command == 'status':
@@ -1778,6 +1963,8 @@ def main() -> int:
         return cmd_projects(args)
     elif args.command == 'prune':
         return cmd_prune(args)
+    elif args.command == 'analyze':
+        return cmd_analyze(args)
     else:
         parser.print_help()
         return 1
