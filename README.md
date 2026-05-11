@@ -55,6 +55,49 @@ Instinct data is stored at `~/.opencode/homunculus/` by default. Override with:
 ECC_DATA_DIR=/path/to/data opencode
 ```
 
+### config.json
+
+The system is configured via `~/.opencode/homunculus/config.json`, auto-created with defaults on first CLI invocation:
+
+```json
+{
+  "version": "2.2",
+  "evolve": {
+    "llm_enabled": true,
+    "llm_timeout_seconds": 60
+  },
+  "injection": {
+    "max_chars": 2000,
+    "min_confidence": 0.7,
+    "enabled": true
+  },
+  "decay": {
+    "rate_per_30days": 0.8,
+    "high_confidence_rate": 0.9,
+    "deprecation_threshold": 0.3
+  },
+  "analysis": {
+    "enabled": true,
+    "timeout_ms": 10000,
+    "min_observations": 20
+  }
+}
+```
+
+| Section | Key | Default | Description |
+|---------|-----|---------|-------------|
+| `evolve` | `llm_enabled` | `true` | Use LLM for clustering (vs heuristic). Override at runtime: `ECC_EVOLVE_LLM_ENABLED=false` |
+| `evolve` | `llm_timeout_seconds` | `60` | Timeout for LLM clustering operations |
+| `injection` | `max_chars` | `2000` | Character limit for prompt injection into session |
+| `injection` | `min_confidence` | `0.7` | Minimum instinct confidence for injection |
+| `injection` | `enabled` | `true` | Enable auto-injection at session start |
+| `decay` | `rate_per_30days` | `0.8` | Decay multiplier per 30 days for instincts < 0.9 confidence |
+| `decay` | `high_confidence_rate` | `0.9` | Slower decay rate for instincts ≥ 0.9 confidence |
+| `decay` | `deprecation_threshold` | `0.3` | Confidence below this → auto-move to `deprecated/` |
+| `analysis` | `enabled` | `true` | Enable session-end analysis via `session.deleted` hook |
+| `analysis` | `timeout_ms` | `10000` | Analysis timeout before cleanup proceeds |
+| `analysis` | `min_observations` | `20` | Minimum observations to trigger analysis |
+
 ### Plugin
 
 The plugin at `.opencode/plugins/ecc-hooks.ts` provides lifecycle hooks via OpenCode's native event system:
