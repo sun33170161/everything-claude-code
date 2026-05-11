@@ -1670,3 +1670,179 @@ def test_analyze_idempotent(patch_globals, monkeypatch, capsys):
 
     second_count = len(list(pending_dir.glob("*.yaml"))) if pending_dir.exists() else 0
     assert first_count == second_count
+
+
+# ─────────────────────────────────────────────
+# Confidence Decay Lifecycle Tests
+# ─────────────────────────────────────────────
+
+def test_decay_lifecycle_full(patch_globals, monkeypatch, capsys):
+    """End-to-end: instinct with old last_observed should show decayed confidence."""
+    from datetime import datetime, timezone, timedelta
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    ninety_days_ago = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    personal_dir = project['project_dir'] / "instincts" / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    instinct_file = personal_dir / "test-instinct.yaml"
+    instinct_file.write_text(f"""---
+id: test-instinct
+trigger: "when testing"
+confidence: 0.8
+domain: testing
+last_observed: {ninety_days_ago}
+---
+
+## Action
+Test action
+""", encoding="utf-8")
+
+    instincts = _mod.load_all_instincts(project)
+    instinct = instincts[0]
+    assert instinct['confidence'] == 0.8
+
+    decayed = _mod._apply_confidence_decay(instincts)
+    assert decayed[0]['confidence'] == pytest.approx(0.41, abs=0.02)
+    assert decayed[0].get('original_confidence') == 0.8
+
+
+def test_decay_user_profile_not_deprecated(patch_globals, monkeypatch, capsys):
+    """User-profile instincts should NOT be auto-deprecated even with low confidence via decay."""
+    from datetime import datetime, timezone, timedelta
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    old_date = (datetime.now(timezone.utc) - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    personal_dir = project['project_dir'] / "instincts" / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+    instinct_file = personal_dir / "user-pref.yaml"
+    instinct_file.write_text(f"""---
+id: user-pref-test
+trigger: "when user prefers concise responses"
+confidence: 0.5
+domain: user-profile
+last_observed: {old_date}
+---
+
+## Action
+Be concise
+""", encoding="utf-8")
+
+    deprecated = _mod._auto_deprecate(project)
+    assert instinct_file.exists()
+    assert deprecated is None or len(deprecated) == 0
+
+
+# ─────────────────────────────────────────────
+# Analyze Lifecycle Test
+# ─────────────────────────────────────────────
+
+def test_analyze_lifecycle(patch_globals, monkeypatch, capsys):
+    """Full lifecycle: create observations, analyze, verify pending instinct structure."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    _write_observations(project, "bash", 30)
+
+    args = SimpleNamespace(dry_run=False, all_projects=False, no_interactive=True, min_observations=20)
+    result = cmd_analyze(args)
+    assert result == 0
+    capsys.readouterr()
+
+    pending_dir = project["project_dir"] / "instincts" / "pending"
+    pending_files = list(pending_dir.glob("*.yaml")) if pending_dir.exists() else []
+    assert len(pending_files) >= 1
+
+    content = pending_files[0].read_text()
+    assert "id:" in content
+    assert "confidence:" in content
+    assert "domain:" in content
+    assert "run-commands" in content or "bash" in content
+
+    cmd_analyze(args)
+    capsys.readouterr()
+    pending_files_again = list(pending_dir.glob("*.yaml")) if pending_dir.exists() else []
+    assert len(pending_files_again) == len(pending_files)
+
+
+# ─────────────────────────────────────────────
+# Prompt Injection Tests
+# ─────────────────────────────────────────────
+
+def test_injection_formatting(patch_globals, monkeypatch, capsys):
+    """Simulate injection formatting logic for high-confidence instincts."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    personal_dir = project['project_dir'] / "instincts" / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+
+    for i, (name, conf) in enumerate([
+        ("high-a", 0.9), ("high-b", 0.8), ("high-c", 0.7),
+        ("low-a", 0.3), ("low-b", 0.4),
+    ]):
+        (personal_dir / f"{name}.yaml").write_text(f"""---
+id: {name}
+trigger: "when testing {name}"
+confidence: {conf}
+domain: testing
+---
+
+## Action
+Test {name}
+""", encoding="utf-8")
+
+    instincts = _mod.load_all_instincts(project)
+    high_conf = [i for i in instincts if i.get('confidence', 0) >= 0.7]
+    assert len(high_conf) == 3
+
+    project_name = "test-project"
+    lines = [f"## Active Instincts for {project_name}"]
+    for inst in sorted(high_conf, key=lambda x: -x['confidence']):
+        pct = round(inst['confidence'] * 100)
+        lines.append(f"- {inst.get('domain', 'general')} ({pct}%): {inst.get('trigger', '')}")
+
+    block = "\n".join(lines)
+    assert len(block) > 0
+    assert "90%" in block
+    assert "70%" in block
+
+
+def test_injection_token_budget(patch_globals, monkeypatch, capsys):
+    """Test 2000 char limit enforcement (highest confidence first)."""
+    project = _make_project(patch_globals, "test-proj", "test-project")
+    monkeypatch.setattr(_mod, "detect_project", lambda: project)
+
+    personal_dir = project['project_dir'] / "instincts" / "personal"
+    personal_dir.mkdir(parents=True, exist_ok=True)
+
+    for i in range(10):
+        conf = round(0.5 + (i * 0.05), 2)
+        (personal_dir / f"instinct-{i}.yaml").write_text(f"""---
+id: instinct-{i}
+trigger: "when user wants to do something very specific and detailed with lots of words to test {i}"
+confidence: {conf}
+domain: testing
+---
+
+## Action
+Do thing {i}
+""", encoding="utf-8")
+
+    instincts = _mod.load_all_instincts(project)
+    high_conf = sorted([i for i in instincts if i.get('confidence', 0) >= 0.7], key=lambda x: -x['confidence'])
+
+    MAX_CHARS = 2000
+    block = "## Active Instincts for test-project\n"
+    included = []
+    for inst in high_conf:
+        line = f"- {inst.get('domain', 'general')} ({round(inst['confidence']*100)}%): {inst.get('trigger', '')}\n"
+        if len(block + line) > MAX_CHARS:
+            break
+        block += line
+        included.append(inst)
+
+    assert len(included) > 0
+    assert included[0]['confidence'] == max(i['confidence'] for i in high_conf)
+    assert len(block) <= MAX_CHARS

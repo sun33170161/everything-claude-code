@@ -6,6 +6,8 @@ v2.2: Added evolve config, unified config loader with auto-creation.
 
 Commands:
   status   - Show all instincts (project + global) and their status
+  analyze  - Analyze observations and create pending instincts
+  identity - Show user identity information
   import   - Import instincts from file or URL
   export   - Export instincts to file
   evolve   - Cluster instincts into skills/commands/agents
@@ -862,6 +864,10 @@ def cmd_status(args) -> int:
             for item in expiring_soon:
                 days_left = max(0, PENDING_TTL_DAYS - item["age_days"])
                 print(f"    - {item['name']} ({days_left}d remaining)")
+
+    deprecated_count = len(_load_instincts_from_deprecated_dir(project))
+    if deprecated_count > 0:
+        print(f"\n  Deprecated instincts: {deprecated_count} (use --show-deprecated to view)")
 
     print(f"\n{'='*60}\n")
     return 0

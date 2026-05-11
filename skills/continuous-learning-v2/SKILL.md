@@ -47,6 +47,60 @@ An advanced learning system that turns your Claude Code sessions into reusable k
 | Config | Observer-only in config.json | Unified config.json with evolve, injection, decay, analysis |
 | Identity System | None | identity.json with technical_level, preferences, expertise |
 
+### v2.2 Data Flow
+
+```
+Session Activity (tool calls, edits, reads)
+      |
+      | hooks record every invocation
+      v
++--- observations.jsonl ----+      +--- identity.json -------+
+| tool=read, file=foo.py    |      | technical_level: expert |
+| tool=edit, file=bar.ts    |      | communication: concise  |
+| ...                        |      +------------------------+
++----------------------------+               |
+      |                                      |
+      | analyze subcommand                   | --format inject
+      | (session.deleted hook)               v
+      v                          +--- Prompt Injection ---+
++--- pending/ directory -------+ | ## User Profile        |
+| tool-foo-obs.yaml (0.45)     | | - Technical Level: ... |
+| tool-bar-obs.yaml (0.60)     | |                        |
++-----------------------------+ | ## Active Instincts     |
+      |                         | - code-style (70%): ... |
+      | promote (manual)        | - testing (90%): ...    |
+      v                         +-------------------------+
++--- personal/ directory ------+         ^
+| prefer-func.yaml (0.8)       |         |
+| write-tests.yaml (0.9)       |   injected at session start
+| validation.yaml (0.6)        |   (≥0.7 confidence, ≤2000 chars)
++------------------------------+
+      |
+      | confidence decay (per status read)
+      | formula: original * (0.8 ** (days/30))
+      v
++--- decayed confidence -------+
+| prefer-func.yaml: 0.8→0.51   |  (last_observed 90 days ago)
+| write-tests.yaml: 0.9→0.90   |  (observed yesterday)
+| validation.yaml: 0.6→0.34    |  (last_observed 60 days ago)
++------------------------------+
+      |
+      | auto-deprecation (if < 0.3 threshold)
+      | (user-profile domain NEVER deprecated)
+      v
++--- deprecated/ directory ----+
+| old-pattern.yaml (0.22)      |  (preserved for audit)
+| stale-habit.yaml (0.18)      |
++------------------------------+
+
+  +--- config.json --------------------+
+  | evolve.llm_enabled: true  (→ LLM) |
+  | injection.max_chars: 2000         |
+  | decay.rate_per_30days: 0.8        |
+  | analysis.enabled: true            |
+  +------------------------------------+
+```
+
 ## What's New in v2 (vs v1)
 
 | Feature | v1 | v2 |
@@ -196,11 +250,14 @@ mkdir -p ~/.opencode/homunculus/{instincts/{personal,inherited},evolved/{agents,
 
 ```bash
 /instinct-status     # Show learned instincts (project + global)
-/evolve              # Cluster related instincts into skills/commands
+/evolve              # Cluster related instincts into skills/commands (LLM or heuristic)
+/learn               # Extract patterns from current session
+/learn-eval          # Extract, evaluate quality gate, then save
 /instinct-export     # Export instincts to file
 /instinct-import     # Import instincts from others
 /promote             # Promote project instincts to global scope
 /projects            # List all known projects and their instinct counts
+/prune               # Delete expired pending instincts (>30 days)
 ```
 
 ## Commands
