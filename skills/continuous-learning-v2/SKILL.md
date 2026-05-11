@@ -44,7 +44,7 @@ An advanced learning system that turns your Claude Code sessions into reusable k
 | Session-End Analysis | Manual via /learn | `analyze` subcommand + session.deleted hook |
 | Prompt Injection | None | High-confidence instinct + identity injection at session start |
 | LLM Evolve | Python heuristic only | Config-driven LLM clustering (config.json evolve.llm_enabled) |
-| Config | Observer-only in config.json | Unified config.json with evolve, injection, decay, analysis |
+| Config | v2.0-era partial config | Unified config.json with evolve, injection, decay, analysis |
 | Identity System | None | identity.json with technical_level, preferences, expertise |
 
 ### v2.2 Data Flow
@@ -158,7 +158,7 @@ Session Activity (in a git repo)
 |   (prompts, tool calls, outcomes, project)   |
 +---------------------------------------------+
       |
-      | Observer agent reads (background, Haiku)
+      | analyze subcommand processes observations
       v
 +---------------------------------------------+
 |          PATTERN DETECTION                   |
@@ -208,32 +208,7 @@ Each project gets a 12-character hash ID (e.g., `a1b2c3d4e5f6`). A registry file
 
 **If installed as a plugin** (recommended):
 
-No extra `settings.json` hook block is required. Claude Code v2.1+ auto-loads the plugin `hooks/hooks.json`, and `observe.sh` is already registered there.
-
-If you previously copied `observe.sh` into `~/.opencode/settings.json`, remove that duplicate `PreToolUse` / `PostToolUse` block. Duplicating the plugin hook causes double execution and `${CLAUDE_PLUGIN_ROOT}` resolution errors because that variable is only available inside plugin-managed `hooks/hooks.json` entries.
-
-**If installed manually** to `~/.opencode/skills`, add this to your `~/.opencode/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "~/.opencode/skills/continuous-learning-v2/hooks/observe.sh"
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "~/.opencode/skills/continuous-learning-v2/hooks/observe.sh"
-      }]
-    }]
-  }
-}
-```
+No extra `settings.json` hook block is required. The plugin auto-registers all hooks.
 
 ### 2. Initialize Directory Structure
 
@@ -297,11 +272,6 @@ Edit `config.json` to control all aspects of the system:
     "enabled": true,
     "timeout_ms": 10000,
     "min_observations": 20
-  },
-  "observer": {
-    "enabled": false,
-    "run_interval_minutes": 5,
-    "min_observations_to_analyze": 20
   }
 }
 ```
@@ -319,9 +289,6 @@ Edit `config.json` to control all aspects of the system:
 | `analysis` | `enabled` | `true` | Enable session-end analysis |
 | `analysis` | `timeout_ms` | `10000` | Timeout for session-end analysis hook |
 | `analysis` | `min_observations` | `20` | Minimum observations for analysis |
-| `observer` | `enabled` | `false` | Enable background observer agent |
-| `observer` | `run_interval_minutes` | `5` | How often observer analyzes observations |
-| `observer` | `min_observations_to_analyze` | `20` | Minimum observations before analysis runs |
 
 The config.json is auto-created with defaults on first CLI invocation.
 

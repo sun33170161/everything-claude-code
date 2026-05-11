@@ -109,11 +109,6 @@ CONFIG_DEFAULTS = {
         "timeout_ms": 10000,
         "min_observations": 20,
     },
-    "observer": {
-        "enabled": False,
-        "run_interval_minutes": 5,
-        "min_observations_to_analyze": 20,
-    },
 }
 CONFIG_FILE = HOMUNCULUS_DIR / "config.json"
 
