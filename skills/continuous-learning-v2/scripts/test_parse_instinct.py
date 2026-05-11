@@ -52,6 +52,12 @@ _move_to_deprecated = _mod._move_to_deprecated
 _auto_deprecate = _mod._auto_deprecate
 _load_instincts_from_deprecated_dir = _mod._load_instincts_from_deprecated_dir
 _load_user_profile_instincts = _mod._load_user_profile_instincts
+_load_identity = _mod._load_identity
+_validate_identity = _mod._validate_identity
+_create_default_identity = _mod._create_default_identity
+_inject_identity_prompt = _mod._inject_identity_prompt
+IDENTITY_FILE = _mod.IDENTITY_FILE
+IDENTITY_DEFAULTS = _mod.IDENTITY_DEFAULTS
 
 
 # ─────────────────────────────────────────────
@@ -128,6 +134,7 @@ def patch_globals(project_tree, monkeypatch):
     monkeypatch.setattr(_mod, "GLOBAL_DEPRECATED_DIR", project_tree["global_deprecated"])
     monkeypatch.setattr(_mod, "GLOBAL_EVOLVED_DIR", project_tree["global_evolved"])
     monkeypatch.setattr(_mod, "GLOBAL_OBSERVATIONS_FILE", project_tree["homunculus"] / "observations.jsonl")
+    monkeypatch.setattr(_mod, "IDENTITY_FILE", project_tree["homunculus"] / "identity.json")
     return project_tree
 
 
@@ -1469,3 +1476,85 @@ Use patterns.
     ids = [i['id'] for i in result]
     assert 'user-style' in ids
     assert 'code-style' not in ids
+
+
+# ─────────────────────────────────────────────
+# Identity Tests
+# ─────────────────────────────────────────────
+
+
+def test_identity_json_auto_created(patch_globals):
+    """identity.json should be auto-created with defaults."""
+    identity_file = patch_globals["homunculus"] / "identity.json"
+    assert not identity_file.exists()
+    _create_default_identity()
+    assert identity_file.exists()
+    data = json.loads(identity_file.read_text())
+    assert data["version"] == "1.0"
+    assert data["technical_level"] == "intermediate"
+
+
+def test_identity_json_not_overwritten(patch_globals):
+    """Calling _create_default_identity again should not overwrite existing."""
+    identity_file = patch_globals["homunculus"] / "identity.json"
+    identity_file.parent.mkdir(parents=True, exist_ok=True)
+    identity_file.write_text(json.dumps({"version": "1.0", "technical_level": "advanced", "name": "Test User"}))
+    _create_default_identity()
+    data = json.loads(identity_file.read_text())
+    assert data["technical_level"] == "advanced"
+    assert data["name"] == "Test User"
+
+
+def test_identity_validation_valid():
+    """Valid identity should return no errors."""
+    data = {
+        "version": "1.0",
+        "technical_level": "expert",
+        "preferences": {
+            "communication_style": "detailed",
+            "response_language": "en",
+            "likes_type_hints": True,
+            "likes_comments": "thorough"
+        }
+    }
+    errors = _validate_identity(data)
+    assert errors == []
+
+
+def test_identity_validation_invalid():
+    """Invalid technical_level should return an error."""
+    data = {"technical_level": "novice"}
+    errors = _validate_identity(data)
+    assert len(errors) >= 1
+    assert "novice" in errors[0]
+
+
+def test_identity_inject_empty():
+    """Default identity should produce empty injection."""
+    data = dict(IDENTITY_DEFAULTS)
+    data["updated"] = "2026-01-01T00:00:00Z"
+    text = _inject_identity_prompt(data)
+    assert text == ""
+
+
+def test_identity_inject_custom():
+    """Custom identity should produce formatted injection."""
+    data = {
+        "version": "1.0",
+        "updated": "2026-01-01T00:00:00Z",
+        "name": "Test User",
+        "technical_level": "expert",
+        "preferences": {
+            "communication_style": "detailed",
+            "response_language": "en",
+            "likes_type_hints": True,
+            "likes_comments": "thorough"
+        },
+        "expertise_areas": ["python", "typescript"]
+    }
+    text = _inject_identity_prompt(data)
+    assert "## User Profile" in text
+    assert "Technical Level: expert" in text
+    assert "Test User" in text
+    assert "python" in text
+    assert len(text) <= 500

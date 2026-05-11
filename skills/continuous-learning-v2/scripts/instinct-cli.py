@@ -65,12 +65,104 @@ PENDING_EXPIRY_WARNING_DAYS = 7
 CONFIDENCE_DECAY_PER_30DAYS = 0.8
 CONFIDENCE_DECAY_HIGH_RATE = 0.9  # For instincts with confidence >= 0.9 (decay slower)
 
+# Identity file
+IDENTITY_FILE = HOMUNCULUS_DIR / "identity.json"
+
+IDENTITY_DEFAULTS = {
+    "version": "1.0",
+    "updated": "",
+    "name": "",
+    "technical_level": "intermediate",
+    "preferences": {
+        "communication_style": "concise",
+        "response_language": "auto",
+        "likes_type_hints": True,
+        "likes_comments": "moderate",
+    },
+    "expertise_areas": [],
+}
+
+VALID_TECHNICAL_LEVELS = ["beginner", "intermediate", "advanced", "expert"]
+VALID_COMMUNICATION_STYLES = ["concise", "detailed", "mixed"]
+VALID_RESPONSE_LANGUAGES = ["en", "zh", "auto"]
+VALID_LIKES_COMMENTS = ["minimal", "moderate", "thorough"]
+
 # Ensure global directories exist (deferred to avoid side effects at import time)
 def _ensure_global_dirs():
     for d in [GLOBAL_PERSONAL_DIR, GLOBAL_INHERITED_DIR, GLOBAL_DEPRECATED_DIR,
               GLOBAL_EVOLVED_DIR / "skills", GLOBAL_EVOLVED_DIR / "commands", GLOBAL_EVOLVED_DIR / "agents",
               PROJECTS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def _load_identity() -> dict:
+    try:
+        with open(IDENTITY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return dict(IDENTITY_DEFAULTS)
+    merged = dict(IDENTITY_DEFAULTS)
+    merged.update(data)
+    return merged
+
+
+def _validate_identity(data: dict) -> list[str]:
+    errors = []
+    tech_level = data.get("technical_level", "")
+    if tech_level and tech_level not in VALID_TECHNICAL_LEVELS:
+        errors.append(f"Invalid technical_level: '{tech_level}'. Must be one of {VALID_TECHNICAL_LEVELS}")
+    prefs = data.get("preferences", {})
+    comm_style = prefs.get("communication_style", "")
+    if comm_style and comm_style not in VALID_COMMUNICATION_STYLES:
+        errors.append(f"Invalid communication_style: '{comm_style}'. Must be one of {VALID_COMMUNICATION_STYLES}")
+    resp_lang = prefs.get("response_language", "")
+    if resp_lang and resp_lang not in VALID_RESPONSE_LANGUAGES:
+        errors.append(f"Invalid response_language: '{resp_lang}'. Must be one of {VALID_RESPONSE_LANGUAGES}")
+    likes_comments = prefs.get("likes_comments", "")
+    if likes_comments and likes_comments not in VALID_LIKES_COMMENTS:
+        errors.append(f"Invalid likes_comments: '{likes_comments}'. Must be one of {VALID_LIKES_COMMENTS}")
+    return errors
+
+
+def _create_default_identity() -> dict:
+    IDENTITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    defaults = dict(IDENTITY_DEFAULTS)
+    defaults["updated"] = now_str
+    if not IDENTITY_FILE.exists():
+        with open(IDENTITY_FILE, "w", encoding="utf-8") as f:
+            json.dump(defaults, f, indent=2)
+    return defaults
+
+
+def _inject_identity_prompt(identity: dict = None) -> str:
+    if identity is None:
+        identity = _load_identity()
+    has_custom_data = (
+        identity.get("name", "").strip()
+        or identity.get("technical_level", "") != "intermediate"
+        or identity.get("expertise_areas", [])
+        or identity.get("preferences", {}).get("communication_style", "") != "concise"
+        or identity.get("preferences", {}).get("response_language", "") != "auto"
+        or identity.get("preferences", {}).get("likes_comments", "") != "moderate"
+        or identity.get("preferences", {}).get("likes_type_hints", True) != True
+    )
+    if not has_custom_data:
+        return ""
+    lines = ["## User Profile"]
+    if identity.get("name"):
+        lines.append(f"- Name: {identity['name']}")
+    lines.append(f"- Technical Level: {identity.get('technical_level', 'intermediate')}")
+    prefs = identity.get("preferences", {})
+    lines.append(f"- Communication: {prefs.get('communication_style', 'concise')}")
+    lines.append(f"- Language: {prefs.get('response_language', 'auto')}")
+    if identity.get("expertise_areas"):
+        areas = ", ".join(identity["expertise_areas"][:5])
+        lines.append(f"- Expertise: {areas}")
+    text = "\n".join(lines)
+    if len(text) > 500:
+        text = text[:497] + "..."
+    return text
 
 
 # ─────────────────────────────────────────────
@@ -581,6 +673,29 @@ def _load_user_profile_instincts(project: dict) -> list[dict]:
 def cmd_status(args) -> int:
     """Show status of all instincts (project + global)."""
     project = detect_project()
+
+    if getattr(args, 'show_identity', False):
+        identity = _load_identity()
+        errors = _validate_identity(identity)
+        print(f"\n{'='*60}")
+        print(f"  USER PROFILE")
+        print(f"{'='*60}\n")
+        print(f"  Technical Level:  {identity.get('technical_level', 'unknown')}")
+        print(f"  Communication:    {identity.get('preferences', {}).get('communication_style', 'unknown')}")
+        print(f"  Language:         {identity.get('preferences', {}).get('response_language', 'unknown')}")
+        print(f"  Type Hints:       {identity.get('preferences', {}).get('likes_type_hints', True)}")
+        print(f"  Comments:         {identity.get('preferences', {}).get('likes_comments', 'unknown')}")
+        if identity.get('expertise_areas'):
+            print(f"  Expertise:        {', '.join(identity['expertise_areas'][:10])}")
+        if identity.get('name'):
+            print(f"  Name:             {identity['name']}")
+        if errors:
+            print(f"\n  Validation issues:")
+            for err in errors:
+                print(f"    - {err}")
+        print()
+        return 0
+
     instincts = load_all_instincts(project)
 
     # Apply confidence decay if enabled (default)
@@ -1593,6 +1708,7 @@ def cmd_prune(args) -> int:
 
 def main() -> int:
     _ensure_global_dirs()
+    _create_default_identity()
     parser = argparse.ArgumentParser(description='Instinct CLI for Continuous Learning v2.1 (Project-Scoped)')
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
@@ -1606,6 +1722,8 @@ def main() -> int:
                               help='Include deprecated instincts in output')
     status_parser.add_argument('--domain', type=str, default=None,
                               help='Filter by domain (e.g., user-profile)')
+    status_parser.add_argument('--show-identity', action='store_true',
+                              help='Show user identity profile')
 
     # Import
     import_parser = subparsers.add_parser('import', help='Import instincts')
