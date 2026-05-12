@@ -93,4 +93,12 @@ export function recordObservation(worktree, toolName, args, event = "tool_comple
     };
     fs.appendFileSync(project.observationsFile, JSON.stringify(observation) + "\n");
 }
+export function recordUserPreference(worktree, preferenceType, details) {
+    const eventMap = {
+        correction: "user_preference_correction",
+        style: "user_preference_style",
+        language: "user_preference_language",
+    };
+    recordObservation(worktree, "user_preference", details, eventMap[preferenceType]);
+}
 //# sourceMappingURL=observation.js.map
